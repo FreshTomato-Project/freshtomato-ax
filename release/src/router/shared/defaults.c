@@ -624,9 +624,14 @@ struct nvram_tuple router_defaults[] = {
 #ifdef RTCONFIG_RALINK
 #elif defined(RTCONFIG_QCA)
 #else
+
+#ifdef TCONFIG_FTAX
+	{ "wl_maxassoc", "128", CKN_STR3, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },	/* FTAX GUI - Max associations driver could support */
+	{ "wl_bss_maxassoc", "128", CKN_STR3, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },	/* FTAX GUI - Max BSS associations driver could support */
+#else
 	{ "wl_maxassoc", "128", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },	/* Max associations driver could support */
 	{ "wl_bss_maxassoc", "128", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },	/* Max associations driver could support */
-
+#endif /* TCONFIG_FTAX */
 	{ "wl_sta_retry_time", "5", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },	/* Seconds between association attempts */
 #endif
 #ifdef BCMDBG

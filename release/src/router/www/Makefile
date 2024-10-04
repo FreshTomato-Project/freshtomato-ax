@@ -107,29 +107,6 @@ ifeq ($(RTCONFIG_ROG_UI), y)
 endif
 #endif
 
-# Only include FreshTomato AX options if configured in.
-ifneq ($(TCONFIG_FTAX),y)
-	cd $(INSTALLDIR)/www && \
-	for F in $(wildcard *.asp *.js *.jsx *.jsz *.dict); do \
-		sed -i $$F -e "/FTAX-BEGIN/,/FTAX-END/d"; \
-	done
-# Or remove AsusWRT options
-else
-	cd $(INSTALLDIR)/www && \
-	for F in $(wildcard *.asp *.js *.jsx *.jsz *.dict); do \
-		sed -i $$F -e "/NOFTAX-BEGIN/,/NOFTAX-END/d"; \
-	done
-endif
-
-# FreshTomato AX options - clean up
-	cd $(INSTALLDIR)/www && \
-	for F in $(wildcard *.asp *.js *.jsx *.jsz *.dict *.html); do \
-		[ -f $(INSTALLDIR)/www/$$F ] && sed -i $$F \
-		-e "/FTAX-BEGIN/d"	-e "/FTAX-END/d" \
-		-e "/NOFTAX-BEGIN/d"	-e "/NOFTAX-END/d" \
-		|| true; \
-	done
-
 ifneq ($(BUILD_NAME),DSL-AX82U)
 	rm -rf $(INSTALLDIR)/www/mobile/js/jstz.min.js
 	rm -rf $(INSTALLDIR)/www/mobile/pages/bridge_cfg_tmp_page.html
@@ -155,6 +132,29 @@ ifneq ($(or $(RTCONFIG_WL_SCHED_V2),$(RTCONFIG_PC_SCHED_V3)),y)
 	rm -rf $(INSTALLDIR)/www/js/weekSchedule
 	rm -rf $(INSTALLDIR)/www/images/New_ui/weekSchedule
 endif
+
+# Only include FreshTomato AX options if configured in.
+ifneq ($(TCONFIG_FTAX),y)
+	cd $(INSTALLDIR)/www && \
+	for F in $(wildcard *.asp *.js *.jsx *.jsz *.dict); do \
+		sed -i $$F -e "/FTAX-BEGIN/,/FTAX-END/d"; \
+	done
+# Or remove AsusWRT options
+else
+	cd $(INSTALLDIR)/www && \
+	for F in $(wildcard *.asp *.js *.jsx *.jsz *.dict); do \
+		sed -i $$F -e "/NOFTAX-BEGIN/,/NOFTAX-END/d"; \
+	done
+endif
+
+# FreshTomato AX options - clean up
+	cd $(INSTALLDIR)/www && \
+	for F in $(wildcard *.asp *.js *.jsx *.jsz *.dict *.html); do \
+		[ -f $(INSTALLDIR)/www/$$F ] && sed -i $$F \
+		-e "/FTAX-BEGIN/d"	-e "/FTAX-END/d" \
+		-e "/NOFTAX-BEGIN/d"	-e "/NOFTAX-END/d" \
+		|| true; \
+	done
 
 	rm -rf $(INSTALLDIR)/www/images/vpn_illustration.png
 	rm -rf $(INSTALLDIR)/www/ajax_vpn_fusion.asp
@@ -1011,4 +1011,3 @@ ifneq ($(RTCONFIG_DNSQUERY_INTERCEPT),y)
 	rm -rf $(INSTALLDIR)/www/getWanTraffic_Dns.asp
 	rm -rf $(INSTALLDIR)/www/getAppTraffic_Dns.asp
 endif
-

@@ -746,6 +746,19 @@ function initial(){
 		}
 	}
 
+/* FTAX-BEGIN */
+/* Not for repeater mode */
+	if(sw_mode != 2){
+		document.getElementById("wl_maxassoc_field").style.display = "";
+		document.form.wl_maxassoc.disabled = false;
+	}
+	else {
+		document.getElementById("wl_maxassoc_field").style.display = "none";
+		document.form.wl_maxassoc.value = 128; // back to default (maximum)
+		document.form.wl_maxassoc.disabled = true;
+	}
+/* FTAX-END */
+
 	if(ofdma_support){
 		var wl_11ax = '<% nvram_get("wl_11ax"); %>';
 		if(document.form.wl_nmode_x.value == '0' || document.form.wl_nmode_x.value == '8'){
@@ -920,7 +933,9 @@ function applyRule(){
 			document.form.wl_HW_switch.value = "0";
 			document.form.wl_HW_switch.disabled = false;
 		}
-		
+/* FTAX-BEGIN */
+		document.form.wl_bss_maxassoc.value = document.form.wl_maxassoc.value; // keep it easy and sync value to global max clients
+/* FTAX-END */
 		if(power_support){
 			document.form.wl_TxPower.value = "";	
 		}
@@ -998,6 +1013,9 @@ function validForm(){
 				|| !validator.range(document.form.wl_rts, 0, 2347)
 				|| !validator.range(document.form.wl_dtim, 1, 255)
 				|| !validator.range(document.form.wl_bcn, 20, 1000)
+/* FTAX-BEGIN */
+				|| !validator.range(document.form.wl_maxassoc, 0, 128)
+/* FTAX-END */
 				){
 			return false;
 		}	
@@ -1347,6 +1365,9 @@ function check_nodes_support_wireless_scheduler() {
 <input type="hidden" name="firmver" value="<% nvram_get("firmver"); %>">
 <input type="hidden" name="wl_subunit" value="-1">
 <input type="hidden" name="wl_amsdu" value="<% nvram_get("wl_amsdu"); %>">
+/* FTAX-BEGIN */
+<input type="hidden" name="wl_bss_maxassoc" value="<% nvram_get("wl_bss_maxassoc"); %>">
+/* FTAX-END */
 <input type="hidden" name="wl0_country_code" value="<% nvram_get("wl0_country_code"); %>" disabled>
 <input type="hidden" name="wl_HW_switch" value="<% nvram_get("wl_HW_switch"); %>" disabled>
 <input type="hidden" name="wl_TxPower" value="<% nvram_get("wl_TxPower"); %>" >
@@ -1462,6 +1483,14 @@ function check_nodes_support_wireless_scheduler() {
 							</select>
 						</td>
 					</tr>
+/* FTAX-BEGIN */
+					<tr id="wl_maxassoc_field" style="display:none">
+			  			<th><a class="hintstyle">Maximum Clients</a></th>
+						<td>
+			  				<input type="text" maxlength="3" name="wl_maxassoc" class="input_6_table" value="<% nvram_get("wl_maxassoc"); %>" onKeyPress="return validator.isNumber(this,event)" autocorrect="off" autocapitalize="off">
+						</td>			  
+					</tr>
+/* FTAX-END */
 					<tr id="wl_mrate_select">
 						<th><a class="hintstyle" href="javascript:void(0);" onClick="openHint(3, 7);"><#WLANConfig11b_MultiRateAll_itemname#></a></th>
 						<td>
