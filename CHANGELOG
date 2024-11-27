@@ -5,6 +5,17 @@ FreshTomato-AX Changelog
 
 
 
+2024.4          2024.11.26
+---------------------------
+- dnsmasq: update to f006be7 (2024.10.04) snapshot [update DNS records after pruning DHCP leases (added as a patch); ref: https://github.com/pi-hole/FTL/pull/1965]
+- router: shared: defaults.c - disable SIP, RTSP and H323 NAT helper by default
+- router: shared : vpn_utils.c - skip \r while importing a DOS-formatted Wireguard config file
+- router: shared: vpn_utils.c - support importing multiple AllowedIPs, DNS or Address instances from wireguard config file
+- router: shared: vpn_utils.c - correctly report disconnected WG client if WG not initialized
+- router: www: client_function.js - fix typo (fix wired client sorting) from Asus/upstream
+- shared: vpn_utils.c AND defaults.c - adjust commit 69a1a0e and 970a078 (add TCONFIG_FTAX symbol)
+
+
 2024.2          2024.05.19
 ---------------------------
 - merge GPL_TUF_AX3000_V2_3004_388_24353
