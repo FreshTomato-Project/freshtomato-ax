@@ -1239,7 +1239,11 @@ struct nvram_tuple router_defaults[] = {
 	{ "wl_taf_enable", "-1", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 }, /* Auto enable TAF */
 #ifdef	HND_ROUTER
 	{ "wl_cal_period", "-1", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },/* Disable periodic cal */
-	{ "wl_psta_inact", "600", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 },/* PSTA inactivity timer */
+#ifdef TCONFIG_FTAX
+	{ "wl_psta_inact", "600", CKN_STR4, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 }, /* FTAX GUI - PSTA inactivity timer for MediaBridge Mode */
+#else
+	{ "wl_psta_inact", "600", CKN_STR_DEFAULT, CKN_TYPE_DEFAULT, CKN_ACC_LEVEL_DEFAULT, CKN_ENC_DEFAULT, 0 }, /* PSTA inactivity timer */
+#endif /* TCONFIG_FTAX */
 #endif
 #endif
 #if defined(BCM_BSD) || (defined(RTCONFIG_NOWL) && defined(RTCONFIG_AMAS))

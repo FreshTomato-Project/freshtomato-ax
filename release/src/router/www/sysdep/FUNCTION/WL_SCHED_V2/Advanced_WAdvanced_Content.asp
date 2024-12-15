@@ -747,7 +747,7 @@ function initial(){
 	}
 
 /* FTAX-BEGIN */
-/* Not for repeater mode */
+	/* Not for repeater mode */
 	if(sw_mode != 2){
 		document.getElementById("wl_maxassoc_field").style.display = "";
 		document.form.wl_maxassoc.disabled = false;
@@ -756,6 +756,16 @@ function initial(){
 		document.getElementById("wl_maxassoc_field").style.display = "none";
 		document.form.wl_maxassoc.value = 128; // back to default (maximum)
 		document.form.wl_maxassoc.disabled = true;
+	}
+	/* Check for MediaBridge Mode */
+	if(isSwMode("mb")){
+		document.getElementById("wl_psta_inact_field").style.display = "";
+		document.form.wl_psta_inact.disabled = false;
+	}
+	else {
+		document.getElementById("wl_psta_inact_field").style.display = "none";
+		document.form.wl_psta_inact.value = 600; // back to Asus default value
+		document.form.wl_psta_inact.disabled = true;
 	}
 /* FTAX-END */
 
@@ -1028,7 +1038,15 @@ function validForm(){
 				return false;
 		}
 	}
-		
+/* FTAX-BEGIN */
+	/* Check for MediaBridge Mode */
+	if(isSwMode("mb")) {
+		if(document.form.wl_psta_inact.value != 0 && !validator.range(document.form.wl_psta_inact, 60, 3600)) {
+			return false;
+		}
+	}
+/* FTAX-END */
+
 	if(power_support && !Rawifi_support && !Qcawifi_support){
 		// MODELDEP
 		if(hw_ver.search("RTN12HP") != -1){
@@ -1446,7 +1464,15 @@ function check_nodes_support_wireless_scheduler() {
 							<input type="radio" value="0" name="wl_ap_isolate" class="input" onClick="return change_common_radio(this, 'WLANConfig11b', 'wl_ap_isolate', '0')" <% nvram_match("wl_ap_isolate", "0", "checked"); %>><#checkbox_No#>
 			  			</td>
 					</tr>
-
+/* FTAX-BEGIN */
+					<tr id="wl_psta_inact_field" style="display:none">
+			  			<th><a class="hintstyle">Inactivity Timer</a></th>
+						<td>
+			  				<input type="text" maxlength="4" name="wl_psta_inact" class="input_6_table" value="<% nvram_get("wl_psta_inact"); %>" onKeyPress="return validator.isNumber(this,event)" autocorrect="off" autocapitalize="off">
+			  				<span id="wl_psta_inact_field_info" style="padding-left:20px;">Range: 60 - 3600 seconds; default: 600; 0: disabled</span>
+						</td>			  
+					</tr>
+/* FTAX-END */
 					<tr id="rssiTr" class="rept ew">
 		  			<th><a class="hintstyle" href="javascript:void(0);" onClick="openHint(3, 31);"><#Roaming_assistant#></a></th>
 						<td>
