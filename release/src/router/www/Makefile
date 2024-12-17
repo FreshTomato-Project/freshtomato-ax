@@ -57,10 +57,12 @@ install:
 	echo $(VISWWW)
 	rm -rf $(INSTALLDIR)/www
 
-#FreshTomato AX (adjust logo)
+#FreshTomato AX (adjust logo, menu Tree)
 ifeq ($(TCONFIG_FTAX), y)
 	cp -f ../patches/www/images/logo_TUF.png sysdep/TUF-AX3000/www/images/New_ui/logo_TUF.png
 	cp -f ../patches/www/images/TUF-logo.png sysdep/TUF-AX3000/www/images/New_ui/TUF-logo.png
+	cp -f ../patches/www/require/modules/menuTree.js require/modules/menuTree.js
+	cp -f ../patches/www/require/menuTrees/menuTree_TUF.js require/menuTrees/menuTree_TUF.js
 endif
 
 	# INSTALLDIR is $(INSTALLDIR)/www here
