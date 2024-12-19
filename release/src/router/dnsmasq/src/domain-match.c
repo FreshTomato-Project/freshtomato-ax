@@ -444,7 +444,13 @@ size_t make_local_answer(int flags, int gotname, size_t size, struct dns_header 
       }
 
   if (trunc)
-    header->hb3 |= HB3_TC;
+    {
+      header->hb3 |= HB3_TC;
+      if (!(p = skip_questions(header, size)))
+	return 0; /* bad packet */
+      anscount  = 0;
+    }
+  
   header->ancount = htons(anscount);
   
   return p - (unsigned char *)header;
@@ -541,9 +547,9 @@ static int order_qsort(const void *a, const void *b)
 
   /* Finally, order by appearance in /etc/resolv.conf etc, for --strict-order */
   if (rc == 0)
-    if (!(s1->flags & SERV_LITERAL_ADDRESS))
+    if (!(s1->flags & SERV_IS_LOCAL) && !(s2->flags & SERV_IS_LOCAL))
       rc = s1->serial - s2->serial;
-
+  
   return rc;
 }
 
@@ -739,12 +745,14 @@ int add_update_server(int flags,
 	serv->addr = *addr;
       if (source_addr)
 	serv->source_addr = *source_addr;
+
+      serv->tcpfd = -1;
     }
     
   serv->flags = flags;
   serv->domain = alloc_domain;
   serv->domain_len = strlen(alloc_domain);
-  
+    
   return 1;
 }
 

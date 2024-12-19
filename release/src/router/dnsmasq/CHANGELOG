@@ -1,8 +1,78 @@
 version 2.91
 	Fix spurious "resource limit exceeded messages". Thanks to 
 	Dominik Derigs for the bug report.
-	
 
+	Fix out-of-bounds heap read in order_qsort().
+	We only need to order two server records on the ->serial field.
+	Literal address records are smaller and don't have
+	this field and don't need to be ordered on it.
+	To actually provoke this bug seems to need the same server-literal
+	to be repeated twice, eg --address=/a/1.1.1.1 --address-/a/1.1.1.1
+	which is clearly rare in the wild, but if it did exist it could
+	provoke a SIGSEV. Thanks to Daniel Rhea for fuzzing this one.
+
+	Fix buffer overflow when configured lease-change script name
+	is too long.
+	Thanks to Daniel Rhea for finding this one.
+
+	Improve behaviour in the face of non-responsive upstream TCP DNS
+	servers. Without shorter timeouts, clients are blocked for too long
+	and fail wuth their own timeouts.
+
+	Set --fast-dns-retries by default when doing DNSSEC. A single
+	downstream query can trigger many upstream queries. On an
+	unreliable network, there may not be enough downstream retries
+	to ensure that all these queries complete.
+
+	Improve behaviour in the face of truncated answers to queries
+	for DNSSEC records. Getting these answers by TCP doesn't now
+	involve a faked truncated answer to the downstream client to
+	force it to move to TCP. This improves performance and robustness
+	in the face of broken clients which can't fall back to TCP.
+
+	No longer remove data from truncated upstream answers. If an
+	upstream replies with a truncated answer, but the answer has some
+	RRs included, return those RRs, rather than returning and
+	empty answer.
+
+	Fix handling of EDNS0 UDP packet sizes.
+	When talking upstream we always add a pseudoheader, and set the
+        UDP packet size to --edns-packet-max. Answering queries from
+	downstream, we get the answer (either from upstream or local
+	data) If local data won't fit the advertised size (or 512 if
+	there's not an EDNS0 header) return truncated. If upstream
+        returns truncated, do likewise. If upstream is OK, but the
+	answer is too big for downstream, truncate the answer.
+
+	Modify the behaviour of --synth-domain for IPv6.
+	When deriving a domain name from an IPv6 address, an address
+	such as 1234:: would become 1234--.example.com, which is
+	not legal in IDNA2008. Stop using the :: compression method,
+	so 1234:: becomes
+	1234-0000-0000-0000-0000-0000-0000-0000.example.com
+
+	Fix broken dhcp-relay on *BSD. Thanks to Harold for finding
+	this problem.
+
+	Add --dhcp-option-pxe config. This acts almost exactly like
+	--dhcp-option except that the defined option is only sent when
+	replying to PXE clients. More importantly, these options are sent
+	in reply PXE clients when dnsmasq in acting in PXE proxy mode. In
+	PXE proxy mode, the set of options sent is defined by the PXE standard
+	and the normal set of options is not sent. This config allows arbitrary
+	options in PXE-proxy replies. A typical use-case is to send option
+	175 to iPXE. Thanks to Jason Berry for finding the requirement for
+	this.
+
+	Support PXE proxy-DHCP and DHCP-relay at the same time.
+        When using PXE proxy-DHCP, dnsmasq supplies PXE information to
+        the client, which also talks to another "normal" DHCP server
+        for address allocation and similar. The normal DHCP server may
+        be on the local network, but it may also be remote, and accessed via
+        a DHCP relay. This change allows dnsmasq to act as both a
+        PXE proxy-DHCP server AND a DHCP relay for the same network.
+
+	
 version 2.90
 	Fix reversion in --rev-server introduced in 2.88 which
 	caused breakage if the prefix length is not exactly divisible

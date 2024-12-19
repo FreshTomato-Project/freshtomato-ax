@@ -13,7 +13,7 @@
  HAVE_TFTP
     define this to get dnsmasq's built-in TFTP server.
  
-@@ -175,6 +181,7 @@ RESOLVFILE
+@@ -172,6 +178,7 @@ RESOLVFILE
  */
  
  /* #define HAVE_BROKEN_RTC */
@@ -23,7 +23,7 @@
     has no library dependencies other than libc */
 --- dnsmasq/src/dnsmasq.c
 +++ dnsmasq/src/dnsmasq.c
-@@ -944,14 +944,14 @@ int main (int argc, char **argv)
+@@ -943,14 +943,14 @@ int main (int argc, char **argv)
    if (!option_bool(OPT_NOWILD)) 
      for (if_tmp = daemon->if_names; if_tmp; if_tmp = if_tmp->next)
        if (if_tmp->name && !(if_tmp->flags & INAME_USED))
@@ -40,7 +40,7 @@
  	my_syslog(LOG_WARNING, _("warning: no upstream servers configured"));
      } 
  
-@@ -1580,6 +1580,10 @@ static void async_event(int pipe, time_t now)
+@@ -1579,6 +1579,10 @@ static void async_event(int pipe, time_t now)
  	   we leave them logging to the old file. */
  	if (daemon->log_file != NULL)
  	  log_reopen(daemon->log_file);
@@ -51,7 +51,7 @@
  	break;
  
        case EVENT_NEWADDR:
-@@ -1624,6 +1628,10 @@ static void async_event(int pipe, time_t now)
+@@ -1623,6 +1627,10 @@ static void async_event(int pipe, time_t now)
  	  }
  #endif
  	
@@ -76,7 +76,7 @@
  #include <sys/wait.h>
  #include <sys/time.h>
  #include <sys/un.h>
-@@ -1457,6 +1461,7 @@ u32 rand32(void);
+@@ -1450,6 +1454,7 @@ u32 rand32(void);
  u64 rand64(void);
  int rr_on_list(struct rrlist *list, unsigned short rr);
  int legal_hostname(char *name);
@@ -104,7 +104,7 @@
  void lease_prune(struct dhcp_lease *target, time_t now);
 --- dnsmasq/src/forward.c
 +++ dnsmasq/src/forward.c
-@@ -104,7 +104,10 @@ int send_from(int fd, int nowild, char *packet, size_t len,
+@@ -100,7 +100,10 @@ int send_from(int fd, int nowild, char *packet, size_t len,
  #ifdef HAVE_LINUX_NETWORK
        /* If interface is still in DAD, EINVAL results - ignore that. */
        if (errno != EINVAL)
@@ -133,7 +133,7 @@
  #else
  	/* strictly time_t is opaque, but this hack should work on all sane systems,
  	   even when sizeof(time_t) == 8 */
-@@ -243,6 +245,22 @@ static void ourprintf(int *errp, char *format, ...)
+@@ -247,6 +249,22 @@ static void ourprintf(int *errp, char *format, ...)
    va_end(ap);
  }
  
@@ -156,7 +156,7 @@
  void lease_update_file(time_t now)
  {
    struct dhcp_lease *lease;
-@@ -264,7 +282,15 @@ void lease_update_file(time_t now)
+@@ -268,7 +286,15 @@ void lease_update_file(time_t now)
  	    continue;
  #endif
  
@@ -172,7 +172,7 @@
  	  ourprintf(&err, "%u ", lease->length);
  #else
  	  ourprintf(&err, "%lu ", (unsigned long)lease->expires);
-@@ -308,7 +334,15 @@ void lease_update_file(time_t now)
+@@ -312,7 +338,15 @@ void lease_update_file(time_t now)
  	      if (!(lease->flags & (LEASE_TA | LEASE_NA)))
  		continue;
  
@@ -188,7 +188,7 @@
  	      ourprintf(&err, "%u ", lease->length);
  #else
  	      ourprintf(&err, "%lu ", (unsigned long)lease->expires);
-@@ -610,6 +644,26 @@ struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int h
+@@ -614,6 +648,26 @@ struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int h
    return NULL;
  }
  
@@ -215,7 +215,7 @@
  struct dhcp_lease *lease_find_by_addr(struct in_addr addr)
  {
    struct dhcp_lease *lease;
-@@ -977,7 +1031,7 @@ void lease_set_hostname(struct dhcp_lease *lease, const char *name, int auth, ch
+@@ -981,7 +1035,7 @@ void lease_set_hostname(struct dhcp_lease *lease, const char *name, int auth, ch
    char *new_name = NULL, *new_fqdn = NULL;
  
    if (config_domain && (!domain || !hostname_isequal(domain, config_domain)))
@@ -226,7 +226,7 @@
      {
 --- dnsmasq/src/option.c
 +++ dnsmasq/src/option.c
-@@ -2424,6 +2424,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
+@@ -2430,6 +2430,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
  	break;
        }
        
@@ -234,7 +234,7 @@
      case LOPT_AUTHSERV: /* --auth-server */
        comma = split(arg);
        
-@@ -2593,6 +2594,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
+@@ -2599,6 +2600,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
  	}
  
        break;
@@ -244,7 +244,7 @@
      case LOPT_SYNTH:  /* --synth-domain */
 --- dnsmasq/src/rfc2131.c
 +++ dnsmasq/src/rfc2131.c
-@@ -244,7 +244,11 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+@@ -247,7 +247,11 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
  	}
  
        /* do we have a lease in store? */
@@ -256,7 +256,7 @@
  
        /* If this request is missing a clid, but we've seen one before, 
  	 use it again for option matching etc. */
-@@ -729,7 +733,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+@@ -732,7 +736,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
        
        *pq = 0;
        
@@ -265,7 +265,7 @@
  	offer_hostname = client_hostname = daemon->dhcp_buff;
      }
    else if ((opt = option_find(mess, sz, OPTION_HOSTNAME, 1)))
-@@ -743,7 +747,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+@@ -746,7 +750,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
  	borken_opt = 1;
        else
  	daemon->dhcp_buff[len] = 0;

@@ -114,7 +114,8 @@ which defaults to 1000ms. If the second parameter is given this controls
 how long the retries will continue for
 otherwise this defaults to 10000ms. Retries are repeated with exponential
 backoff. Using this option increases memory usage and
-network bandwidth.
+network bandwidth. If not otherwise configured, this option is activated
+with the default parameters when \fB--dnssec\fP is set.
 .TP
 .B \-k, --keep-in-foreground
 Do not go into the background at startup but otherwise run as
@@ -133,7 +134,7 @@ only, to stop dnsmasq daemonising in production, use
 Log the results of DNS queries handled by dnsmasq. Enable a full cache dump on receipt of SIGUSR1. If the argument "extra" is supplied, ie
 .B --log-queries=extra
 then the log has extra information at the start of each line.
-This consists of a serial number which ties together the log lines associated with an individual query, and the IP address of the requestor.
+This consists of a serial number which ties together the log lines associated with an individual query, and the IP address of the requestor. If the argument "proto" is supplied, this shows everything that "extra" does and also the network protocol used to communicate the queries.
 .TP
 .B \-8, --log-facility=<facility>
 Set the facility to which dnsmasq will send syslog entries, this
@@ -768,19 +769,18 @@ results in the name internal-0.thekelleys.org.uk. returning 192.168.0.50, intern
 Second, 
 .B --synth-domain=thekelleys.org.uk,192.168.0.0/24,internal- (no *)
 will result in a query for internal-192-168-0-56.thekelleys.org.uk returning
-192.168.0.56 and a reverse query vice versa. The same applies to IPv6,
-but IPv6 addresses may start with '::'
-but DNS labels may not start with '-' so in this case if no prefix is
-configured a zero is added in front of the label. ::1 becomes 0--1.
-
-V4 mapped IPv6 addresses, which have a representation like ::ffff:1.2.3.4 are handled specially, and become like 0--ffff-1-2-3-4
+192.168.0.56 and a reverse query vice versa. The same applies to IPv6;
+the representation doesn't use the :: compression feature or
+the special representation of V4 mapped IPv6 addresses as these
+can generate illegal domain names, so all domains are of the form
+internal-1000-0000-0000-0000-0000-0000-0000-0008.example.com
 
 The address range can be of the form
 <start address>,<end address> or <ip address>/<prefix-length> in both forms of the option. For IPv6 the start and end addresses
 must fall in the same /64 network, or prefix-length must be greater than or equal to 64 except that shorter prefix lengths than 64 are allowed only if non-sequential names are in use.
 .TP
 .B --dumpfile=<path/to/file>
-Specify the location of a pcap-format file which dnsmasq uses to dump copies of network packets for debugging purposes. If the file exists when dnsmasq starts, it is not deleted; new packets are added to the end.
+Specify the location of a pcap-format file which dnsmasq uses to dump copies of network packets for debugging purposes. If the file exists when dnsmasq starts, it is not deleted; new packets are added to the end. The file may be a named-pipe which Wireshark is listening to.
 .TP
 .B --dumpmask=<mask>
 Specify which types of packets should be added to the dumpfile. The argument should be the OR of the bitmasks for each type of packet to be dumped: it can be specified in hex by preceding the number with 0x in  the normal way. Each time a packet is written to the dumpfile, dnsmasq logs the packet sequence and the mask
@@ -1395,7 +1395,7 @@ Options may be encapsulated (IPv4 only) within other options: for instance
 will send option 175, within which is the option 190. If multiple
 options are given which are encapsulated with the same option number
 then they will be correctly combined into one encapsulated option.
-encap: and vendor: are may not both be set in the same \fB--dhcp-option\fP.
+encap: and vendor: may not both be set in the same \fB--dhcp-option\fP.
 
 The final variant on encapsulated options is "Vendor-Identifying
 Vendor Options" as specified by RFC3925. These are denoted like this: 
@@ -1413,6 +1413,10 @@ This works in exactly the same way as
 except that the option will always be sent, even if the client does
 not ask for it in the parameter request list. This is sometimes
 needed, for example when sending options to PXELinux.
+.TP
+.B --dhcp-option-pxe=[tag:<tag>,[tag:<tag>,]][encap:<opt>,][vi-encap:<enterprise>,]<opt>,[<value>[,<value>]]
+A variant of --dhcp-option which defines options only sent in reply to PXE clients. In addition, such options are
+sent in reply to PXE clients when dnsmasq is acting as a PXE proxy, unlike other options. A typical use-case is option 175, sent to iPXE.
 .TP
 .B --dhcp-no-override
 (IPv4 only) Disable re-use of the DHCP servername and filename fields as extra
@@ -1676,6 +1680,11 @@ to allow netbooting. This mode is enabled using the
 .B proxy
 keyword in
 .B --dhcp-range.
+If the "other" DHCP server is on a remote network, it is
+possible, and useful, to configure dnsmasq as both a PXE proxy-DHCP server
+and a DHCP relay to the remote DHCP server. See
+.B --dhcp-relay
+for details. PXE is only supported over IPv4 at this time.
 .TP
 .B --dhcp-pxe-vendor=<vendor>[,...]
 According to UEFI and PXE specifications, DHCP packets between PXE clients and
