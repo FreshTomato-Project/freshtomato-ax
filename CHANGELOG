@@ -5,8 +5,18 @@ FreshTomato-AX Changelog
 
 
 
+2024.5          2024.12.24
+---------------------------
+
+- dnsmasq: update to 5483fea (2024-12-05) snapshot
+- GUI: Advanced_WAdvanced_Content.asp - add option for Maximum Wireless Clients (v2)
+- GUI: Advanced_WAdvanced_Content.asp - show it also in Repeater & MediaBridge Mode (and allow more wl options to be adjusted!)
+- GUI: Advanced_WAdvanced_Content.asp - add Inactivity Timer option for Media Bridge Mode (60 up to 3600 sec)
+
+
 2024.4          2024.11.26
 ---------------------------
+
 - dnsmasq: update to f006be7 (2024.10.04) snapshot [update DNS records after pruning DHCP leases (added as a patch); ref: https://github.com/pi-hole/FTL/pull/1965]
 - router: shared: defaults.c - disable SIP, RTSP and H323 NAT helper by default
 - router: shared : vpn_utils.c - skip \r while importing a DOS-formatted Wireguard config file
@@ -18,6 +28,7 @@ FreshTomato-AX Changelog
 
 2024.2          2024.05.19
 ---------------------------
+
 - merge GPL_TUF_AX3000_V2_3004_388_24353
 - rc: firewall.c - fix write_access_restriction() that's broken in 24353
 - router: dropbear: re-add scp applet with patch (adjust for GPL 3.0.0.4.388.24353)
