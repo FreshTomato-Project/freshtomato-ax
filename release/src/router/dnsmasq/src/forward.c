@@ -278,10 +278,15 @@ static int forward_query(int udpfd, union mysockaddr *udpaddr,
   /* new query */
   if (!forward)
     {
-      /* If the query is malformed, we can't forward it because
-	 we can't recognise the answer. */
-      if (!gotname)
+      if (OPCODE(header) != QUERY)
 	{
+	  flags = F_RCODE;
+	  goto reply;
+	}
+      else if (!gotname)
+	{
+	  /* If the query is malformed, we can't forward it because
+	     we can't recognise the answer. */
 	  flags = 0;
 	  ede = EDE_INVALID_DATA;
 	  goto reply;
@@ -906,7 +911,7 @@ static void dnssec_validate(struct frec *forward, struct dns_header *header,
 	  else
 	    status = dnssec_validate_reply(now, header, plen, daemon->namebuff, daemon->keyname, &forward->class, 
 					   !option_bool(OPT_DNSSEC_IGN_NS) && (forward->sentto->flags & SERV_DO_DNSSEC),
-				       NULL, NULL, NULL, &orig->validate_counter);
+					   NULL, NULL, NULL, &orig->validate_counter);
 	  
 	  if (STAT_ISEQUAL(status, STAT_ABANDONED))
 	    log_resource = 1;
@@ -1220,12 +1225,21 @@ void reply_query(int fd, time_t now)
   
   
 #ifdef HAVE_DNSSEC
-  if ((forward->sentto->flags & SERV_DO_DNSSEC) && 
-      option_bool(OPT_DNSSEC_VALID) &&
-      !(forward->flags & FREC_CHECKING_DISABLED))
-    dnssec_validate(forward, header, n, STAT_OK, now);
-  else
+  if (option_bool(OPT_DNSSEC_VALID))
+    {
+      if ((forward->sentto->flags & SERV_DO_DNSSEC) && !(forward->flags & FREC_CHECKING_DISABLED))
+	{
+	  dnssec_validate(forward, header, n, STAT_OK, now);
+	  return;
+	}
+      
+      /* If dnssec_validate() not called, rr_status{} is not valid
+	 Clear it so we don't erroneously mark RRs as secure using stale data from
+	 previous queries. */
+      memset(daemon->rr_status, 0, sizeof(*daemon->rr_status) * daemon->rr_status_sz);
+    }
 #endif
+  
     return_reply(now, forward, header, n, STAT_OK); 
 }
 
@@ -1441,10 +1455,16 @@ void receive_query(struct listener *listen, time_t now)
   size_t m;
   ssize_t n;
   int if_index = 0, auth_dns = 0, do_bit = 0, have_pseudoheader = 0;
+  int stale = 0, filtered = 0, ede = EDE_UNSET, do_forward = 0;
+  int metric, ad_reqd, fd; 
+  struct blockdata *saved_question = NULL;
 #ifdef HAVE_CONNTRACK
   unsigned int mark = 0;
   int have_mark = 0;
-  int is_single_query = 0, allowed = 1;
+  int allowed = 1;
+#  ifdef HAVE_UBUS
+  int report = 0;
+#  endif
 #endif
 #ifdef HAVE_AUTH
   int local_auth = 0;
@@ -1680,8 +1700,10 @@ void receive_query(struct listener *listen, time_t now)
   if (option_bool(OPT_CMARK_ALST_EN))
     have_mark = get_incoming_mark(&source_addr, &dst_addr, /* istcp: */ 0, &mark);
 #endif
-	  
-  if (extract_request(header, (size_t)n, daemon->namebuff, &type))
+
+  if (OPCODE(header) != QUERY)
+    log_query_mysockaddr(F_QUERY | F_FORWARD, "opcode", &source_addr, "non-query", 0);
+  else if (extract_request(header, (size_t)n, daemon->namebuff, &type))
     {
 #ifdef HAVE_AUTH
       struct auth_zone *zone;
@@ -1689,10 +1711,6 @@ void receive_query(struct listener *listen, time_t now)
       log_query_mysockaddr(F_QUERY | F_FORWARD, daemon->namebuff,
 			   &source_addr, auth_dns ? "auth" : "query", type);
       
-#ifdef HAVE_CONNTRACK
-      is_single_query = 1;
-#endif
-
 #ifdef HAVE_AUTH
       /* find queries for zones we're authoritative for, and answer them directly */
       if (!auth_dns && !option_bool(OPT_LOCALISE))
@@ -1733,119 +1751,103 @@ void receive_query(struct listener *listen, time_t now)
       else if (udp_size < PACKETSZ)
 	udp_size = PACKETSZ; /* Sanity check - can't reduce below default. RFC 6891 6.2.3 */
     }
+
+  ad_reqd = do_bit;
+  /* RFC 6840 5.7 */
+  if (header->hb4 & HB4_AD)
+    ad_reqd = 1;
+
+  fd = listen->fd;
   
 #ifdef HAVE_CONNTRACK
 #ifdef HAVE_AUTH
   if (!auth_dns || local_auth)
 #endif
     if (option_bool(OPT_CMARK_ALST_EN) && have_mark && ((u32)mark & daemon->allowlist_mask))
-      allowed = is_query_allowed_for_mark((u32)mark, is_single_query ? daemon->namebuff : NULL);
+      allowed = is_query_allowed_for_mark((u32)mark, daemon->namebuff);
 #endif
   
   if (0);
 #ifdef HAVE_CONNTRACK
   else if (!allowed)
     {
-      u16 swap = htons(EDE_BLOCKED);
-
-      m = answer_disallowed(header, (size_t)n, (u32)mark, is_single_query ? daemon->namebuff : NULL);
-      
-      if (have_pseudoheader && m != 0)
-	m = add_pseudoheader(header,  m,  ((unsigned char *) header) + daemon->edns_pktsz,
-			     EDNS0_OPTION_EDE, (unsigned char *)&swap, 2, do_bit, 0);
-      
-      if (m >= 1)
-	{
-#ifdef HAVE_DUMPFILE
-	  dump_packet_udp(DUMP_REPLY, daemon->packet, m, NULL, &source_addr, listen->fd);
-#endif
-	  send_from(listen->fd, option_bool(OPT_NOWILD) || option_bool(OPT_CLEVERBIND),
-		    (char *)header, m, &source_addr, &dst_addr, if_index);
-	  daemon->metrics[METRIC_DNS_LOCAL_ANSWERED]++;
-	}
+      ede = EDE_BLOCKED;
+      m = answer_disallowed(header, (size_t)n, (u32)mark, daemon->namebuff);
+      metric = METRIC_DNS_LOCAL_ANSWERED;
     }
 #endif
 #ifdef HAVE_AUTH
   else if (auth_dns)
     {
       m = answer_auth(header, ((char *) header) + udp_size, (size_t)n, now, &source_addr, local_auth);
-      if (m >= 1)
-	{
-	  if (have_pseudoheader)
-	    m = add_pseudoheader(header,  m,  ((unsigned char *) header) + udp_size,
-				 0, NULL, 0, do_bit, 0);
-	  
-#ifdef HAVE_DUMPFILE
-	  dump_packet_udp(DUMP_REPLY, daemon->packet, m, NULL, &source_addr, listen->fd);
-#endif
+      metric = METRIC_DNS_AUTH_ANSWERED;
+
 #if defined(HAVE_CONNTRACK) && defined(HAVE_UBUS)
-	  if (local_auth)
-	    if (option_bool(OPT_CMARK_ALST_EN) && have_mark && ((u32)mark & daemon->allowlist_mask))
-	      report_addresses(header, m, mark);
+      if (local_auth)
+	report = 1;
 #endif
-	  send_from(listen->fd, option_bool(OPT_NOWILD) || option_bool(OPT_CLEVERBIND),
-		    (char *)header, m, &source_addr, &dst_addr, if_index);
-	  daemon->metrics[METRIC_DNS_AUTH_ANSWERED]++;
-	}
     }
 #endif
   else
     {
-      int stale, filtered;
-      int ad_reqd = do_bit;
-      int fd = listen->fd;
-      struct blockdata *saved_question = blockdata_alloc((char *) header, (size_t)n);
+      saved_question = blockdata_alloc((char *) header, (size_t)n);
       
-      /* RFC 6840 5.7 */
-      if (header->hb4 & HB4_AD)
-	ad_reqd = 1;
-
       m = answer_request(header, ((char *) header) + udp_size, (size_t)n, 
 			 dst_addr_4, netmask, now, ad_reqd, do_bit, &stale, &filtered);
       
-      if (m >= 1)
+      metric = stale ? METRIC_DNS_STALE_ANSWERED : METRIC_DNS_LOCAL_ANSWERED;
+      
+      if (m == 0)
+	do_forward = 1;
+      else
 	{
-	  if (have_pseudoheader)
-	    {
-	      int ede = EDE_UNSET;
-
-	      if (filtered)
-		ede = EDE_FILTERED;
-	      else if (stale)
-		ede = EDE_STALE;
-
-	      if (ede != EDE_UNSET)
-		{
-		  u16 swap = htons(ede);
-		  
-		  m = add_pseudoheader(header,  m,  ((unsigned char *) header) + daemon->edns_pktsz,
-				       EDNS0_OPTION_EDE, (unsigned char *)&swap, 2, do_bit, 0);
-		}
-	      else
-		m = add_pseudoheader(header,  m,  ((unsigned char *) header) + daemon->edns_pktsz,
-				     0, NULL, 0, do_bit, 0);
-	    }
-	  
-#ifdef HAVE_DUMPFILE
-	  dump_packet_udp(DUMP_REPLY, daemon->packet, m, NULL, &source_addr, listen->fd);
-#endif
 #if defined(HAVE_CONNTRACK) && defined(HAVE_UBUS)
-	  if (option_bool(OPT_CMARK_ALST_EN) && have_mark && ((u32)mark & daemon->allowlist_mask))
-	    report_addresses(header, m, mark);
+	  report = 1;
 #endif
-	  send_from(listen->fd, option_bool(OPT_NOWILD) || option_bool(OPT_CLEVERBIND),
-		    (char *)header, m, &source_addr, &dst_addr, if_index);
-	  daemon->metrics[METRIC_DNS_LOCAL_ANSWERED]++;
-	  if (stale)
-	    daemon->metrics[METRIC_DNS_STALE_ANSWERED]++;
+
+	  if (filtered)
+	    ede = EDE_FILTERED;
+	  else if (stale)
+	    ede = EDE_STALE;
 	}
+    }
+  
+  if (m != 0)
+    {
+      if (have_pseudoheader)
+	{
+	  if (ede != EDE_UNSET)
+	    {
+	      u16 swap = htons(ede);
+	      
+	      m = add_pseudoheader(header,  m,  ((unsigned char *) header) + daemon->edns_pktsz,
+				   EDNS0_OPTION_EDE, (unsigned char *)&swap, 2, do_bit, 0);
+	    }
+	  else
+	    m = add_pseudoheader(header,  m,  ((unsigned char *) header) + daemon->edns_pktsz,
+				 0, NULL, 0, do_bit, 0);
+	}
+  
+#ifdef HAVE_DUMPFILE
+      dump_packet_udp(DUMP_REPLY, daemon->packet, m, NULL, &source_addr, listen->fd);
+#endif
+      
+#if defined(HAVE_CONNTRACK) && defined(HAVE_UBUS)
+      if (report)
+	report_addresses(header, m, mark);
+#endif
+      
+      send_from(listen->fd, option_bool(OPT_NOWILD) || option_bool(OPT_CLEVERBIND),
+		(char *)header, m, &source_addr, &dst_addr, if_index);
+
+      daemon->metrics[metric]++;
       
       if (stale)
 	{
 	  /* We answered with stale cache data, so forward the query anyway to
 	     refresh that. */
-	  m = 0;
-
+	  do_forward = 1;
+	  
 	  /* Don't mark the query with the source in this case. */
 	  daemon->log_source_addr = NULL;
 	  
@@ -1853,25 +1855,25 @@ void receive_query(struct listener *listen, time_t now)
 	     when it comes back. */
 	  fd = -1;
 	}
-      
-      if (saved_question)
-	{
-	  if (m == 0)
-	    {
-	      /* Get the question back, since it may have been mangled by answer_request() */
-	      blockdata_retrieve(saved_question, (size_t)n, (void *)header);
-	      blockdata_free(saved_question);
-	      if (forward_query(fd, &source_addr, &dst_addr, if_index, header, (size_t)n,
-				udp_size, now, NULL, ad_reqd, do_bit, 0))
-		daemon->metrics[METRIC_DNS_QUERIES_FORWARDED]++;
-	      else
-		daemon->metrics[METRIC_DNS_LOCAL_ANSWERED]++;
-	    }
-	  else
-	    blockdata_free(saved_question);
-	}
     }
+  
+  if (do_forward && saved_question)
+    {
+      /* Get the question back, since it may have been mangled by answer_request() */
+      blockdata_retrieve(saved_question, (size_t)n, (void *)header);
+      blockdata_free(saved_question);
+      saved_question = NULL;
+      
+      if (forward_query(fd, &source_addr, &dst_addr, if_index, header, (size_t)n,
+			udp_size, now, NULL, ad_reqd, do_bit, 0))
+	daemon->metrics[METRIC_DNS_QUERIES_FORWARDED]++;
+      else
+	daemon->metrics[METRIC_DNS_LOCAL_ANSWERED]++;
+    }
+
+  blockdata_free(saved_question);
 }
+
  
 /* Send query in packet, qsize to a server determined by first,last,start and
    get the reply. return reply size. */
@@ -2203,19 +2205,17 @@ unsigned char *tcp_request(int confd, time_t now,
 			   union mysockaddr *local_addr, struct in_addr netmask, int auth_dns)
 {
   size_t size = 0, saved_size = 0;
-  int norebind;
+  int norebind = 0;
 #ifdef HAVE_CONNTRACK
-  int is_single_query = 0, allowed = 1;
+  int allowed = 1;
 #endif
 #ifdef HAVE_AUTH
   int local_auth = 0;
 #endif
-  int checking_disabled, do_bit, added_pheader = 0, have_pseudoheader = 0;
-  int cacheable, no_cache_dnssec = 0, cache_secure = 0, bogusanswer = 0;
-  size_t m;
+  int checking_disabled, do_bit = 0, ad_reqd = 0, added_pheader = 0, have_pseudoheader = 0;
   struct blockdata *saved_question = NULL;
   unsigned short qtype;
-  unsigned int gotname;
+  unsigned int gotname = 0;
   /* Max TCP packet + slop + size */
   unsigned char *packet = whine_malloc(65536 + MAXDNAME + RRFIXEDSZ + sizeof(u16));
   unsigned char *payload = &packet[2];
@@ -2231,9 +2231,8 @@ unsigned char *tcp_request(int confd, time_t now,
   unsigned char *pheader;
   unsigned int mark = 0;
   int have_mark = 0;
-  int first, last, filtered, stale, do_stale = 0;
-  unsigned int flags = 0;
-    
+  int first, last, filtered, do_stale = 0;
+      
   if (!packet || getpeername(confd, (struct sockaddr *)&peer_addr, &peer_len) == -1)
     return packet;
 
@@ -2285,8 +2284,13 @@ unsigned char *tcp_request(int confd, time_t now,
 
   while (1)
     {
-      int ede = EDE_UNSET;
-
+      int stale = 0, ede = EDE_UNSET;
+      size_t m = 0;
+      unsigned int flags = 0;
+#ifdef HAVE_AUTH
+      struct auth_zone *zone;
+#endif
+	  
       if (!do_stale)
 	{
 	  if (query_count >= TCP_MAX_QUERIES)
@@ -2296,39 +2300,38 @@ unsigned char *tcp_request(int confd, time_t now,
 	      !(size = ntohs(tcp_len)) ||
 	      !read_write(confd, payload, size, RW_READ))
 	    break;
-	}
-      
-      if (size < (int)sizeof(struct dns_header))
-	continue;
-
-      /* Clear buffer beyond request to avoid risk of
-	 information disclosure. */
-      memset(payload + size, 0, 65536 - size);
-      
-      query_count++;
-
-      /* log_query gets called indirectly all over the place, so 
-	 pass these in global variables - sorry. 
-	 log_display_id is negative for TCP connections. */
-      daemon->log_display_id = -(++daemon->log_id);
-      daemon->log_source_addr = &peer_addr;
-      
-      /* save state of "cd" flag in query */
-      if ((checking_disabled = header->hb4 & HB4_CD))
-	no_cache_dnssec = 1;
-       
-      if ((gotname = extract_request(header, (unsigned int)size, daemon->namebuff, &qtype)))
-	{
-#ifdef HAVE_AUTH
-	  struct auth_zone *zone;
-#endif
-
-#ifdef HAVE_CONNTRACK
-	  is_single_query = 1;
-#endif
-
-	  if (!do_stale)
+	      
+	  if (size < (int)sizeof(struct dns_header))
+	    continue;
+	  
+	  /* Clear buffer beyond request to avoid risk of
+	     information disclosure. */
+	  memset(payload + size, 0, 65536 - size);
+	  
+	  query_count++;
+	  
+	  /* log_query gets called indirectly all over the place, so 
+	     pass these in global variables - sorry. 
+	     log_display_id is negative for TCP connections. */
+	  daemon->log_display_id = -(++daemon->log_id);
+	  daemon->log_source_addr = &peer_addr;
+	  
+	  if (OPCODE(header) != QUERY)
 	    {
+	      log_query_mysockaddr(F_QUERY | F_FORWARD, "opcode", &peer_addr, "non-query", 0);
+	      gotname = 0;
+	      flags = F_RCODE;
+	    }
+	  else if (!(gotname = extract_request(header, (unsigned int)size, daemon->namebuff, &qtype)))
+	    ede = EDE_INVALID_DATA;
+	  else
+	    {
+	      if (saved_question)
+		blockdata_free(saved_question);
+	      
+	      saved_question = blockdata_alloc((char *)header, (size_t)size);
+	      saved_size = size;
+	      
 	      log_query_mysockaddr(F_QUERY | F_FORWARD, daemon->namebuff,
 				   &peer_addr, auth_dns ? "auth" : "query", qtype);
 	      
@@ -2343,114 +2346,89 @@ unsigned char *tcp_request(int confd, time_t now,
 		      break;
 		    }
 #endif
+	      
+	      norebind = domain_no_rebind(daemon->namebuff);
+	  
+	      if (local_addr->sa.sa_family == AF_INET)
+		dst_addr_4 = local_addr->in.sin_addr;
+	      else
+		dst_addr_4.s_addr = 0;
+	      
+	      do_bit = 0;
+	      
+	      if (find_pseudoheader(header, (size_t)size, NULL, &pheader, NULL, NULL))
+		{ 
+		  unsigned short ede_flags;
+		  
+		  have_pseudoheader = 1;
+		  pheader += 4; /* udp_size, ext_rcode */
+		  GETSHORT(ede_flags, pheader);
+		  
+		  if (ede_flags & 0x8000)
+		    do_bit = 1; /* do bit */ 
+		}
+
+	      ad_reqd = do_bit;
+	      /* RFC 6840 5.7 */
+	      if (header->hb4 & HB4_AD)
+		ad_reqd = 1;
+
+#ifdef HAVE_CONNTRACK
+#ifdef HAVE_AUTH
+	      if (!auth_dns || local_auth)
+#endif
+		if (option_bool(OPT_CMARK_ALST_EN) && have_mark && ((u32)mark & daemon->allowlist_mask))
+		  allowed = is_query_allowed_for_mark((u32)mark, daemon->namebuff);
+#endif
+	  
+	      if (0);
+#ifdef HAVE_CONNTRACK
+	      else if (!allowed)
+		{
+		  ede = EDE_BLOCKED;
+		  m = answer_disallowed(header, size, (u32)mark, daemon->namebuff);
+		}
+#endif
+#ifdef HAVE_AUTH
+	      else if (auth_dns)
+		m = answer_auth(header, ((char *) header) + 65536, (size_t)size, now, &peer_addr, local_auth);
+#endif
+	      else
+		m = answer_request(header, ((char *) header) + 65536, (size_t)size, 
+				   dst_addr_4, netmask, now, ad_reqd, do_bit, &stale, &filtered);
 	    }
 	}
       
-      norebind = domain_no_rebind(daemon->namebuff);
+      /* Do this by steam now we're not in the select() loop */
+      check_log_writer(1); 
       
-      if (local_addr->sa.sa_family == AF_INET)
-	dst_addr_4 = local_addr->in.sin_addr;
-      else
-	dst_addr_4.s_addr = 0;
-      
-      do_bit = 0;
-
-      if (find_pseudoheader(header, (size_t)size, NULL, &pheader, NULL, NULL))
-	{ 
-	  unsigned short flags;
-	  
-	  have_pseudoheader = 1;
-	  pheader += 4; /* udp_size, ext_rcode */
-	  GETSHORT(flags, pheader);
-      
-	  if (flags & 0x8000)
-	    do_bit = 1; /* do bit */ 
-	}
-      
-#ifdef HAVE_CONNTRACK
-#ifdef HAVE_AUTH
-      if (!auth_dns || local_auth)
-#endif
-	if (option_bool(OPT_CMARK_ALST_EN) && have_mark && ((u32)mark & daemon->allowlist_mask))
-	  allowed = is_query_allowed_for_mark((u32)mark, is_single_query ? daemon->namebuff : NULL);
-#endif
-
-      if (0);
-#ifdef HAVE_CONNTRACK
-      else if (!allowed)
+      if (m == 0 && ede == EDE_UNSET && saved_question)
 	{
-	  u16 swap = htons(EDE_BLOCKED);
+	  struct server *master;
+	  int start;
+	  int cacheable, no_cache_dnssec = 0, cache_secure = 0, bogusanswer = 0;
 
-	  m = answer_disallowed(header, size, (u32)mark, is_single_query ? daemon->namebuff : NULL);
+	  blockdata_retrieve(saved_question, (size_t)saved_size, header);
+	  size = saved_size;
+
+	  /* save state of "cd" flag in query */
+	  if ((checking_disabled = header->hb4 & HB4_CD))
+	    no_cache_dnssec = 1;
+
+	  if (lookup_domain(daemon->namebuff, gotname, &first, &last))
+	    flags = is_local_answer(now, first, daemon->namebuff);
+	  else
+	    ede = EDE_NOT_READY;
 	  
-	  if (have_pseudoheader && m != 0)
-	    m = add_pseudoheader(header,  m, ((unsigned char *) header) + 65536, 
-				 EDNS0_OPTION_EDE, (unsigned char *)&swap, 2, do_bit, 0);
-	}
-#endif
-#ifdef HAVE_AUTH
-      else if (auth_dns)
-	{
-	  m = answer_auth(header, ((char *) header) + 65536, (size_t)size, now, &peer_addr, local_auth);
-	  if (m >= 1 && have_pseudoheader)
-	    m = add_pseudoheader(header,  m,  ((unsigned char *) header) + 65536,
-				 0, NULL, 0, do_bit, 0);
-	}
-#endif
-      else
-	{
-	   int ad_reqd = do_bit;
-	   /* RFC 6840 5.7 */
-	   if (header->hb4 & HB4_AD)
-	     ad_reqd = 1;
-
-	   if (do_stale)
-	     m = 0;
-	   else
-	     {
-	       if (saved_question)
-		 blockdata_free(saved_question);
-	       
-	       saved_question = blockdata_alloc((char *)header, (size_t)size);
-	       saved_size = size;
-	       
-	       /* m > 0 if answered from cache */
-	       m = answer_request(header, ((char *) header) + 65536, (size_t)size, 
-				  dst_addr_4, netmask, now, ad_reqd, do_bit, &stale, &filtered);
-
-	       if (m >= 1 && have_pseudoheader)
-		 m = add_pseudoheader(header,  m,  ((unsigned char *) header) + 65536,
-				      0, NULL, 0, do_bit, 0);
-	     }
-	  /* Do this by steam now we're not in the select() loop */
-	  check_log_writer(1); 
-	  
-	  if (m == 0 && saved_question)
+	  if (!flags && ede == EDE_UNSET)
 	    {
-	      struct server *master;
-	      int start;
-
-	      blockdata_retrieve(saved_question, (size_t)saved_size, header);
-	      size = saved_size;
-	      
-	      if (lookup_domain(daemon->namebuff, gotname, &first, &last))
-		flags = is_local_answer(now, first, daemon->namebuff);
-	      else
-		{
-		  /* No configured servers */
-		  ede = EDE_NOT_READY;
-		  flags = 0;
-		}
-	      
 	      /* don't forward A or AAAA queries for simple names, except the empty name */
-	      if (!flags &&
-		  option_bool(OPT_NODOTS_LOCAL) &&
+	      if (option_bool(OPT_NODOTS_LOCAL) &&
 		  (gotname & (F_IPV4 | F_IPV6)) &&
 		  !strchr(daemon->namebuff, '.') &&
 		  strlen(daemon->namebuff) != 0)
 		flags = check_for_local_domain(daemon->namebuff, now) ? F_NOERR : F_NXDOMAIN;
-		
-	      if (!flags && ede != EDE_NOT_READY)
+	      else
 		{
 		  master = daemon->serverarray[first];
 		  
@@ -2480,81 +2458,90 @@ unsigned char *tcp_request(int confd, time_t now,
 		  
 		  /* Loop round available servers until we succeed in connecting to one. */
 		  if ((m = tcp_talk(first, last, start, packet, size, have_mark, mark, &serv)) == 0)
-		    {
-		      ede = EDE_NETERR;
-		      break;
-		    }
-		  
-		  /* get query name again for logging - may have been overwritten */
-		  if (!(gotname = extract_request(header, (unsigned int)size, daemon->namebuff, &qtype)))
-		    strcpy(daemon->namebuff, "query");
-		  log_query_mysockaddr(F_SERVER | F_FORWARD, daemon->namebuff, &serv->addr, NULL, 0);
-		  
-#ifdef HAVE_DNSSEC
-		  if (option_bool(OPT_DNSSEC_VALID) && !checking_disabled && (master->flags & SERV_DO_DNSSEC))
-		    {
-		      int keycount = daemon->limit[LIMIT_WORK]; /* Limit to number of DNSSEC questions, to catch loops and avoid filling cache. */
-		      int validatecount = daemon->limit[LIMIT_CRYPTO]; 
-		      int status = tcp_key_recurse(now, STAT_OK, header, m, 0, daemon->namebuff, daemon->keyname, 
-						   serv, have_mark, mark, &keycount, &validatecount);
-		      char *result, *domain = "result";
-		      
-		      union all_addr a;
-		      a.log.ede = ede = errflags_to_ede(status);
-		      
-		      if (STAT_ISEQUAL(status, STAT_ABANDONED))
-			{
-			  result = "ABANDONED";
-			  status = STAT_BOGUS;
-			}
-		      else
-			result = (STAT_ISEQUAL(status, STAT_SECURE) ? "SECURE" : (STAT_ISEQUAL(status, STAT_INSECURE) ? "INSECURE" : "BOGUS"));
-		      
-		      if (STAT_ISEQUAL(status, STAT_SECURE))
-			cache_secure = 1;
-		      else if (STAT_ISEQUAL(status, STAT_BOGUS))
-			{
-			  no_cache_dnssec = 1;
-			  bogusanswer = 1;
-			  
-			  if (extract_request(header, m, daemon->namebuff, NULL))
-			    domain = daemon->namebuff;
-			}
-		      
-		      log_query(F_SECSTAT, domain, &a, result, 0);
-		    
-		      if ((daemon->limit[LIMIT_CRYPTO] - validatecount) > (int)daemon->metrics[METRIC_CRYPTO_HWM])
-			daemon->metrics[METRIC_CRYPTO_HWM] = daemon->limit[LIMIT_CRYPTO] - validatecount;
-
-		      if ((daemon->limit[LIMIT_WORK] - keycount) > (int)daemon->metrics[METRIC_WORK_HWM])
-			daemon->metrics[METRIC_WORK_HWM] = daemon->limit[LIMIT_WORK] - keycount;
-
-		      /* include DNSSEC queries in the limit for a connection. */
-		      query_count += daemon->limit[LIMIT_WORK] - keycount;
-		    }
-#endif
-		  
-		  /* restore CD bit to the value in the query */
-		  if (checking_disabled)
-		    header->hb4 |= HB4_CD;
+		    ede = EDE_NETERR;
 		  else
-		    header->hb4 &= ~HB4_CD;
-		  
-		  /* Never cache answers which are contingent on the source or MAC address EDSN0 option,
-		     since the cache is ignorant of such things. */
-		  if (!cacheable)
-		    no_cache_dnssec = 1;
-		  
-		  m = process_reply(header, now, serv, (unsigned int)m, 
-				    option_bool(OPT_NO_REBIND) && !norebind, no_cache_dnssec, cache_secure, bogusanswer,
-				    ad_reqd, do_bit, added_pheader, &peer_addr, ((unsigned char *)header) + 65536, ede); 
+		    {
+		      /* get query name again for logging - may have been overwritten */
+		      if (!(gotname = extract_request(header, (unsigned int)size, daemon->namebuff, &qtype)))
+			strcpy(daemon->namebuff, "query");
+		      log_query_mysockaddr(F_SERVER | F_FORWARD, daemon->namebuff, &serv->addr, NULL, 0);
+		      
+#ifdef HAVE_DNSSEC
+		      if (option_bool(OPT_DNSSEC_VALID))
+			{
+			  /* Clear this in case we don't call tcp_key_recurse() below */
+			  memset(daemon->rr_status, 0, sizeof(*daemon->rr_status) * daemon->rr_status_sz);
+			  
+			  if (!checking_disabled && (master->flags & SERV_DO_DNSSEC))
+			    {
+			      int keycount = daemon->limit[LIMIT_WORK]; /* Limit to number of DNSSEC questions, to catch loops and avoid filling cache. */
+			      int validatecount = daemon->limit[LIMIT_CRYPTO]; 
+			      int status = tcp_key_recurse(now, STAT_OK, header, m, 0, daemon->namebuff, daemon->keyname, 
+							   serv, have_mark, mark, &keycount, &validatecount);
+			      char *result, *domain = "result";
+			      
+			      union all_addr a;
+			      a.log.ede = ede = errflags_to_ede(status);
+			      
+			      if (STAT_ISEQUAL(status, STAT_ABANDONED))
+				{
+				  result = "ABANDONED";
+				  status = STAT_BOGUS;
+				}
+			      else
+				result = (STAT_ISEQUAL(status, STAT_SECURE) ? "SECURE" : (STAT_ISEQUAL(status, STAT_INSECURE) ? "INSECURE" : "BOGUS"));
+			      
+			      if (STAT_ISEQUAL(status, STAT_SECURE))
+				cache_secure = 1;
+			      else if (STAT_ISEQUAL(status, STAT_BOGUS))
+				{
+				  no_cache_dnssec = 1;
+				  bogusanswer = 1;
+				  
+				  if (extract_request(header, m, daemon->namebuff, NULL))
+				    domain = daemon->namebuff;
+				}
+			      
+			      log_query(F_SECSTAT, domain, &a, result, 0);
+			      
+			      if ((daemon->limit[LIMIT_CRYPTO] - validatecount) > (int)daemon->metrics[METRIC_CRYPTO_HWM])
+				daemon->metrics[METRIC_CRYPTO_HWM] = daemon->limit[LIMIT_CRYPTO] - validatecount;
+			      
+			      if ((daemon->limit[LIMIT_WORK] - keycount) > (int)daemon->metrics[METRIC_WORK_HWM])
+				daemon->metrics[METRIC_WORK_HWM] = daemon->limit[LIMIT_WORK] - keycount;
+			      
+			      /* include DNSSEC queries in the limit for a connection. */
+			      query_count += daemon->limit[LIMIT_WORK] - keycount;
+			    }
+			}
+#endif
+
+		    
+		      /* restore CD bit to the value in the query */
+		      if (checking_disabled)
+			header->hb4 |= HB4_CD;
+		      else
+			header->hb4 &= ~HB4_CD;
+		      
+		      /* Never cache answers which are contingent on the source or MAC address EDSN0 option,
+			 since the cache is ignorant of such things. */
+		      if (!cacheable)
+			no_cache_dnssec = 1;
+		      
+		      m = process_reply(header, now, serv, (unsigned int)m, 
+					option_bool(OPT_NO_REBIND) && !norebind, no_cache_dnssec, cache_secure, bogusanswer,
+					ad_reqd, do_bit, added_pheader, &peer_addr, ((unsigned char *)header) + 65536, ede);
+
+		      /* process_reply() adds pheader itself */
+		      have_pseudoheader = 0; 
+		    }
 		}
 	    }
 	}
-	
+
       if (do_stale)
 	break;
-    
+      
       /* In case of local answer or no connections made. */
       if (m == 0)
 	{
@@ -2562,10 +2549,8 @@ unsigned char *tcp_request(int confd, time_t now,
 				      ((char *) header) + 65536, first, last, ede)))
 	    break;
 	}
-      else
+      else if (ede == EDE_UNSET)
 	{
-	  ede = EDE_UNSET;
-
 	  if (filtered)
 	    ede = EDE_FILTERED;
 	  else if (stale)
@@ -2593,6 +2578,7 @@ unsigned char *tcp_request(int confd, time_t now,
 	if (option_bool(OPT_CMARK_ALST_EN) && have_mark && ((u32)mark & daemon->allowlist_mask))
 	  report_addresses(header, m, mark);
 #endif
+      
       if (!read_write(confd, packet, m + sizeof(u16), RW_WRITE))
 	break;
       
@@ -2605,6 +2591,8 @@ unsigned char *tcp_request(int confd, time_t now,
 	  shutdown(confd, SHUT_RDWR);
 	  close(confd);
 	  do_stale = 1;
+	  /* Don't mark the query with the source when refreshing stale data. */
+	  daemon->log_source_addr = NULL;
 	}
     }
 
@@ -3066,7 +3054,7 @@ static struct frec *lookup_frec(char *target, int class, int rrtype, int id, int
 }
 
 /* Send query packet again, if we can. */
-void resend_query()
+void resend_query(void)
 {
   if (daemon->srv_save)
     server_send(daemon->srv_save, daemon->fd_save,

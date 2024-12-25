@@ -934,6 +934,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
 	  opt71.next = daemon->dhcp_opts;
 	  do_encap_opts(&opt71, OPTION_VENDOR_CLASS_OPT, DHOPT_VENDOR_MATCH, mess, end, 0);
 	  
+	  daemon->metrics[METRIC_PXE]++;
 	  log_packet("PXE", &mess->yiaddr, emac, emac_len, iface_name, (char *)mess->file, NULL, mess->xid);
 	  log_tags(tagif_netid, ntohl(mess->xid));
 	  return dhcp_packet_size(mess, agent_id, real_end);	  
@@ -2756,7 +2757,7 @@ static void handle_encap(struct dhcp_packet *mess, unsigned char *end, unsigned 
 
   struct dhcp_opt *opt, *config_opts = daemon->dhcp_opts;
   unsigned char *p;
-  int i, len;
+  int len;
 
   for (opt = config_opts; opt; opt = opt->next)
     opt->flags &= ~DHOPT_ENCAP_DONE;

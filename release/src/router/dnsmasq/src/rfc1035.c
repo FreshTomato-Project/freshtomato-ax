@@ -706,7 +706,7 @@ int extract_addresses(struct dns_header *header, size_t qlen, char *name, time_t
 	      if (aqclass == C_IN && res != 2 && (aqtype == T_CNAME || aqtype == T_PTR))
 		{
 #ifdef HAVE_DNSSEC
-		  if (option_bool(OPT_DNSSEC_VALID) && daemon->rr_status[j] != 0)
+		  if (option_bool(OPT_DNSSEC_VALID) && j < daemon->rr_status_sz && daemon->rr_status[j] != 0)
 		    {
 		      /* validated RR anywhere in CNAME chain, don't cache. */
 		      if (cname_short || aqtype == T_CNAME)
@@ -825,7 +825,7 @@ int extract_addresses(struct dns_header *header, size_t qlen, char *name, time_t
 	    }
 	  
 #ifdef HAVE_DNSSEC
-	  if (option_bool(OPT_DNSSEC_VALID) && daemon->rr_status[j] != 0)
+	  if (option_bool(OPT_DNSSEC_VALID) && j < daemon->rr_status_sz && daemon->rr_status[j] != 0)
 	    {
 	      secflag = F_DNSSECOK;
 	      
@@ -1191,7 +1191,7 @@ unsigned int extract_request(struct dns_header *header, size_t qlen, char *name,
   
   if (ntohs(header->qdcount) != 1 || OPCODE(header) != QUERY)
     return 0; /* must be exactly one query. */
-  
+
   if (!(header->hb3 & HB3_QR) && (ntohs(header->ancount) != 0 || ntohs(header->nscount) != 0))
     return 0; /* non-standard query. */
   
@@ -1240,6 +1240,8 @@ void setup_reply(struct dns_header *header, unsigned int flags, int ede)
     SET_RCODE(header, NOERROR); /* empty domain */
   else if (flags == F_NXDOMAIN)
     SET_RCODE(header, NXDOMAIN);
+  else if (flags == F_RCODE)
+    SET_RCODE(header, NOTIMP);
   else if (flags & ( F_IPV4 | F_IPV6))
     {
       SET_RCODE(header, NOERROR);
@@ -2182,7 +2184,7 @@ size_t answer_request(struct dns_header *header, char *limit, size_t qlen,
 		    if (flags & F_NXDOMAIN)
 		      nxdomain = 1;
 		    else if (qtype != T_ANY && rr_on_list(daemon->filter_rr, qtype))
-		      flags |=  F_NEG | F_CONFIG;
+		      flags |= F_NEG | F_CONFIG;
 		    
 		    auth = 0;
 		    ans = 1;
@@ -2210,8 +2212,8 @@ size_t answer_request(struct dns_header *header, char *limit, size_t qlen,
 		      anscount++;
 		    
 		    /* log after cache insertion as log_txt mangles rrdata */
-		    if (qtype == T_TXT && !(crecp->flags & F_NEG))
-		      log_txt(name, (unsigned char *)rrdata, rrlen, crecp->flags & F_DNSSECOK);
+		    if (qtype == T_TXT && !(flags & F_NEG))
+		      log_txt(name, (unsigned char *)rrdata, rrlen, flags & (F_DNSSECOK | F_STALE));
 		    else
 		      log_query(flags, name, &crecp->addr, NULL, 0);
 		  }
