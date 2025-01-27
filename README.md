@@ -1,8 +1,8 @@
 **HOW TO PREPARE A WORK ENVIRONMENT FOR FRESHTOMATO-AX COMPILATION**
   
-1. Base is FreshTomato ARM - see https://bitbucket.org/pedro311/freshtomato-arm/src/arm-master/README.md
+1. Base is FreshTomato ARM - see https://github.com/FreshTomato-Project/freshtomato-arm/blob/arm-master/README.md
   
-2. git clone https://bitbucket.org/pedro311/freshtomato-ax.git
+2. git clone https://github.com/FreshTomato-Project/freshtomato-ax
   
 3. Toolchain (--> adjust to your path/folder)
     ```sh
