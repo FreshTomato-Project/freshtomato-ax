@@ -76,7 +76,7 @@
  #include <sys/wait.h>
  #include <sys/time.h>
  #include <sys/un.h>
-@@ -1458,6 +1462,7 @@ u32 rand32(void);
+@@ -1459,6 +1463,7 @@ u32 rand32(void);
  u64 rand64(void);
  int rr_on_list(struct rrlist *list, unsigned short rr);
  int legal_hostname(char *name);
@@ -84,7 +84,7 @@
  char *canonicalise(char *in, int *nomem);
  unsigned char *do_rfc1035_name(unsigned char *p, char *sval, char *limit);
  void *safe_malloc(size_t size);
-@@ -1591,6 +1596,9 @@ char *host_from_dns(struct in_addr addr);
+@@ -1592,6 +1597,9 @@ char *host_from_dns(struct in_addr addr);
  
  /* lease.c */
  #ifdef HAVE_DHCP
@@ -94,7 +94,7 @@
  void lease_update_file(time_t now);
  void lease_update_dns(int force);
  void lease_init(time_t now);
-@@ -1617,6 +1625,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
+@@ -1618,6 +1626,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
  void lease_set_interface(struct dhcp_lease *lease, int interface, time_t now);
  struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int hw_type,  
  					unsigned char *clid, int clid_len);
@@ -226,7 +226,7 @@
      {
 --- dnsmasq/src/option.c
 +++ dnsmasq/src/option.c
-@@ -2430,6 +2430,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
+@@ -2433,6 +2433,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
  	break;
        }
        
@@ -234,7 +234,7 @@
      case LOPT_AUTHSERV: /* --auth-server */
        comma = split(arg);
        
-@@ -2599,6 +2600,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
+@@ -2602,6 +2603,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
  	}
  
        break;
