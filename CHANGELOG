@@ -1,8 +1,15 @@
 ===========================
 FreshTomato-AX Changelog
 ===========================
-(for full changelog, see: https://bitbucket.org/pedro311/freshtomato-ax/src/master/CHANGELOG)
+(for full changelog, see: https://github.com/FreshTomato-Project/freshtomato-ax/blob/master/CHANGELOG)
 
+
+
+2025.1          2025.02.27
+---------------------------
+
+- dnsmasq: update to v2.91rc5
+- tomatoanon: update url to https://anon.freshtomato.org
 
 
 2024.5          2024.12.24
