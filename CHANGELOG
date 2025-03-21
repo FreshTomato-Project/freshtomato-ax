@@ -5,6 +5,14 @@ FreshTomato-AX Changelog
 
 
 
+2025.2          2025.03.20
+---------------------------
+
+- Note: Mainly a bugfix release due to a serious bug in dnsmasq causing a SIGSEGV (segmentation violation) in some cases: https://thekelleys.org.uk/gitweb/?p=dnsmasq.git;a=commitdiff;h=9af15871e6ef0ac845412e9a6c3ecfb0849374c8
+
+- dnsmasq: update to 2.91rc6
+
+
 2025.1          2025.02.27
 ---------------------------
 
