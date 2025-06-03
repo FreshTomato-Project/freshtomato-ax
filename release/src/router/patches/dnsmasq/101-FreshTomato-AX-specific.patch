@@ -1,6 +1,6 @@
 --- dnsmasq/src/config.h
 +++ dnsmasq/src/config.h
-@@ -83,6 +83,12 @@ HAVE_BROKEN_RTC
+@@ -85,6 +85,12 @@ HAVE_BROKEN_RTC
     NOTE: when enabling or disabling this, be sure to delete any old
     leases file, otherwise dnsmasq may get very confused.
  
@@ -13,7 +13,7 @@
  HAVE_TFTP
     define this to get dnsmasq's built-in TFTP server.
  
-@@ -174,6 +180,7 @@ RESOLVFILE
+@@ -176,6 +182,7 @@ RESOLVFILE
  */
  
  /* #define HAVE_BROKEN_RTC */
@@ -23,7 +23,7 @@
     has no library dependencies other than libc */
 --- dnsmasq/src/dnsmasq.c
 +++ dnsmasq/src/dnsmasq.c
-@@ -959,14 +959,14 @@ int main (int argc, char **argv)
+@@ -967,14 +967,14 @@ int main (int argc, char **argv)
    if (!option_bool(OPT_NOWILD)) 
      for (if_tmp = daemon->if_names; if_tmp; if_tmp = if_tmp->next)
        if (if_tmp->name && !(if_tmp->flags & INAME_USED))
@@ -40,7 +40,7 @@
  	{
  #ifdef HAVE_DBUS
  	  if (option_bool(OPT_DBUS))
-@@ -1613,6 +1613,10 @@ static void async_event(int pipe, time_t now)
+@@ -1621,6 +1621,10 @@ static void async_event(int pipe, time_t now)
  	   we leave them logging to the old file. */
  	if (daemon->log_file != NULL)
  	  log_reopen(daemon->log_file);
@@ -51,7 +51,7 @@
  	break;
  
        case EVENT_NEWADDR:
-@@ -1657,6 +1661,10 @@ static void async_event(int pipe, time_t now)
+@@ -1665,6 +1669,10 @@ static void async_event(int pipe, time_t now)
  	  }
  #endif
  	
@@ -64,7 +64,7 @@
  
 --- dnsmasq/src/dnsmasq.h
 +++ dnsmasq/src/dnsmasq.h
-@@ -95,7 +95,11 @@ typedef unsigned long long u64;
+@@ -101,7 +101,11 @@ typedef unsigned long long u64;
  #if defined(HAVE_SOLARIS_NETWORK)
  #  include <sys/sockio.h>
  #endif
@@ -76,7 +76,7 @@
  #include <sys/wait.h>
  #include <sys/time.h>
  #include <sys/un.h>
-@@ -1477,6 +1481,7 @@ u32 rand32(void);
+@@ -1482,6 +1486,7 @@ u32 rand32(void);
  u64 rand64(void);
  int rr_on_list(struct rrlist *list, unsigned short rr);
  int legal_hostname(char *name);
@@ -84,7 +84,7 @@
  char *canonicalise(char *in, int *nomem);
  unsigned char *do_rfc1035_name(unsigned char *p, char *sval, char *limit);
  void *safe_malloc(size_t size);
-@@ -1610,6 +1615,9 @@ char *host_from_dns(struct in_addr addr);
+@@ -1615,6 +1620,9 @@ char *host_from_dns(struct in_addr addr);
  
  /* lease.c */
  #ifdef HAVE_DHCP
@@ -94,7 +94,7 @@
  void lease_update_file(time_t now);
  void lease_update_dns(int force);
  void lease_init(time_t now);
-@@ -1639,6 +1647,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
+@@ -1644,6 +1652,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
  void lease_set_vendorclass(struct dhcp_lease *lease, unsigned char *new, int len);
  struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int hw_type,  
  					unsigned char *clid, int clid_len);
