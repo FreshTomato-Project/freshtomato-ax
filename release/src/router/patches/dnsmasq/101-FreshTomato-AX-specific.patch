@@ -317,7 +317,7 @@
  	outmsgtype = DHCP6REPLY;
 --- dnsmasq/src/util.c
 +++ dnsmasq/src/util.c
-@@ -201,13 +201,15 @@ static int check_name(char *in)
+@@ -205,13 +205,15 @@ static int check_name(char *in)
     so check for legal char a-z A-Z 0-9 - _ 
     Note that this may receive a FQDN, so only check the first label 
     for the tighter criteria. */
@@ -336,7 +336,7 @@
  
    for (first = 1; (c = *name); name++, first = 0)
      /* check for legal char a-z A-Z 0-9 - _ . */
-@@ -219,14 +221,49 @@ int legal_hostname(char *name)
+@@ -223,14 +225,49 @@ int legal_hostname(char *name)
  
        if (!first && (c == '-' || c == '_'))
  	continue;
