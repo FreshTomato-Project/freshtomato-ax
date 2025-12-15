@@ -709,7 +709,8 @@ static const struct opttab_t {
   { "client-machine-id", 97, 0 },
   { "posix-timezone", 100, OT_NAME }, /* RFC 4833, Sec. 2 */
   { "tzdb-timezone", 101, OT_NAME }, /* RFC 4833, Sec. 2 */
-  { "ipv6-only", 108, 4 | OT_DEC },  /* RFC 8925 */ 
+  { "ipv6-only", 108, 4 | OT_DEC },  /* RFC 8925 */
+  { "captive-portal", 114, OT_NAME },  /* RFC 8910 */
   { "subnet-select", 118, OT_INTERNAL },
   { "domain-search", 119, OT_RFC1035_NAME },
   { "sip-server", 120, 0 },
@@ -751,6 +752,7 @@ static const struct opttab_t opttab6[] = {
   { "ntp-server", 56, 0 /* OT_ADDR_LIST | OT_RFC1035_NAME */ },
   { "bootfile-url", 59, OT_NAME },
   { "bootfile-param", 60, OT_CSTRING },
+  { "captive-portal", 103, OT_NAME },  /* RFC 8910 */
   { NULL, 0, 0 }
 };
 #endif
@@ -1067,10 +1069,12 @@ void log_relay(int family, struct dhcp_relay *relay)
     {
       if (broadcast)
 	my_syslog(MS_DHCP | LOG_INFO, _("DHCP relay from %s via %s"), daemon->addrbuff, relay->interface);
+      else if (relay->split_mode)
+	my_syslog(MS_DHCP | LOG_INFO, _("DHCP split-relay from %s to %s via %s"), daemon->addrbuff, daemon->namebuff, relay->interface);
       else
 	my_syslog(MS_DHCP | LOG_INFO, _("DHCP relay from %s to %s via %s"), daemon->addrbuff, daemon->namebuff, relay->interface);
     }
-  else
+  else 
     my_syslog(MS_DHCP | LOG_INFO, _("DHCP relay from %s to %s"), daemon->addrbuff, daemon->namebuff);
 }
    

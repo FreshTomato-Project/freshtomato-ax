@@ -23,7 +23,7 @@
     has no library dependencies other than libc */
 --- dnsmasq/src/dnsmasq.c
 +++ dnsmasq/src/dnsmasq.c
-@@ -967,14 +967,14 @@ int main (int argc, char **argv)
+@@ -968,14 +968,14 @@ int main (int argc, char **argv)
    if (!option_bool(OPT_NOWILD)) 
      for (if_tmp = daemon->if_names; if_tmp; if_tmp = if_tmp->next)
        if (if_tmp->name && !(if_tmp->flags & INAME_USED))
@@ -40,7 +40,7 @@
  	{
  #ifdef HAVE_DBUS
  	  if (option_bool(OPT_DBUS))
-@@ -1621,6 +1621,10 @@ static void async_event(int pipe, time_t now)
+@@ -1620,6 +1620,10 @@ static void async_event(int pipe, time_t now)
  	   we leave them logging to the old file. */
  	if (daemon->log_file != NULL)
  	  log_reopen(daemon->log_file);
@@ -51,7 +51,7 @@
  	break;
  
        case EVENT_NEWADDR:
-@@ -1665,6 +1669,10 @@ static void async_event(int pipe, time_t now)
+@@ -1664,6 +1668,10 @@ static void async_event(int pipe, time_t now)
  	  }
  #endif
  	
@@ -76,7 +76,7 @@
  #include <sys/wait.h>
  #include <sys/time.h>
  #include <sys/un.h>
-@@ -1482,6 +1486,7 @@ u32 rand32(void);
+@@ -1485,6 +1489,7 @@ u32 rand32(void);
  u64 rand64(void);
  int rr_on_list(struct rrlist *list, unsigned short rr);
  int legal_hostname(char *name);
@@ -84,7 +84,7 @@
  char *canonicalise(char *in, int *nomem);
  unsigned char *do_rfc1035_name(unsigned char *p, char *sval, char *limit);
  void *safe_malloc(size_t size);
-@@ -1615,6 +1620,9 @@ char *host_from_dns(struct in_addr addr);
+@@ -1618,6 +1623,9 @@ char *host_from_dns(struct in_addr addr);
  
  /* lease.c */
  #ifdef HAVE_DHCP
@@ -94,7 +94,7 @@
  void lease_update_file(time_t now);
  void lease_update_dns(int force);
  void lease_init(time_t now);
-@@ -1644,6 +1652,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
+@@ -1647,6 +1655,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
  void lease_set_vendorclass(struct dhcp_lease *lease, unsigned char *new, int len);
  struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int hw_type,  
  					unsigned char *clid, int clid_len);
@@ -226,7 +226,7 @@
      {
 --- dnsmasq/src/option.c
 +++ dnsmasq/src/option.c
-@@ -2439,6 +2439,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
+@@ -2442,6 +2442,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
  	break;
        }
        
@@ -234,7 +234,7 @@
      case LOPT_AUTHSERV: /* --auth-server */
        comma = split(arg);
        
-@@ -2608,6 +2609,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
+@@ -2611,6 +2612,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
  	}
  
        break;
@@ -244,7 +244,7 @@
      case LOPT_SYNTH:  /* --synth-domain */
 --- dnsmasq/src/rfc2131.c
 +++ dnsmasq/src/rfc2131.c
-@@ -248,7 +248,11 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+@@ -252,7 +252,11 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
  	}
  
        /* do we have a lease in store? */
@@ -256,7 +256,7 @@
  
        /* If this request is missing a clid, but we've seen one before, 
  	 use it again for option matching etc. */
-@@ -736,7 +740,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+@@ -747,7 +751,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
        
        *pq = 0;
        
@@ -265,7 +265,7 @@
  	offer_hostname = client_hostname = daemon->dhcp_buff;
      }
    else if ((opt = option_find(mess, sz, OPTION_HOSTNAME, 1)))
-@@ -750,7 +754,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+@@ -761,7 +765,7 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
  	borken_opt = 1;
        else
  	daemon->dhcp_buff[len] = 0;
@@ -276,7 +276,7 @@
  
 --- dnsmasq/src/rfc3315.c
 +++ dnsmasq/src/rfc3315.c
-@@ -169,7 +169,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
+@@ -170,7 +170,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
  	  if (!state->context)
  	    {
  	      inet_ntop(AF_INET6, state->link_address, daemon->addrbuff, ADDRSTRLEN); 
@@ -286,7 +286,7 @@
  			_("no address range available for DHCPv6 request from relay at %s"),
  			daemon->addrbuff);
  	      return 0;
-@@ -178,7 +179,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
+@@ -179,7 +180,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
  	  
        if (!state->context)
  	{
@@ -296,7 +296,7 @@
  		    _("no address range available for DHCPv6 request via %s"), state->iface_name);
  	  return 0;
  	}
-@@ -508,7 +510,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
+@@ -517,7 +519,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
  	     pq--;
  	   *pq = 0;
  	   
@@ -305,7 +305,7 @@
  	     {
  	       struct dhcp_match_name *m;
  	       size_t nl = strlen(daemon->dhcp_buff);
-@@ -1141,7 +1143,8 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
+@@ -1144,7 +1146,8 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
  	else
  	  state->send_domain = get_domain6(NULL);
  

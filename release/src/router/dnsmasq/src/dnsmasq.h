@@ -1109,7 +1109,7 @@ struct ping_result {
 
 struct tftp_file {
   int refcount, fd;
-  off_t size;
+  off_t size, posn;
   dev_t dev;
   ino_t inode;
   char filename[];
@@ -1117,13 +1117,14 @@ struct tftp_file {
 
 struct tftp_transfer {
   int sockfd;
+  u16 block_hi, ackprev;
   time_t retransmit, start;
   unsigned int lastack, block, blocksize, windowsize, timeout, expansion;
   off_t offset;
   union mysockaddr peer;
   union all_addr source;
   int if_index;
-  unsigned char opt_blocksize, opt_transize, opt_windowsize, opt_timeout, netascii, carrylf, backoff;
+  unsigned char opt_blocksize, opt_transize, opt_windowsize, opt_timeout, netascii, carrylf, lastcarrylf, backoff;
   struct tftp_file *file;
   struct tftp_transfer *next;
 };
@@ -1144,10 +1145,12 @@ struct dhcp_relay {
   union {
     struct in_addr addr4;
     struct in6_addr addr6;
-  } local, server;
+  } local, server, uplink;
   char *interface; /* Allowable interface for replies from server, and dest for IPv6 multicast */
   int iface_index; /* working - interface in which requests arrived, for return */
   int port;        /* Port of relay we forward to. */
+  int split_mode;  /* Split address allocation and relay address. */
+  int warned, matchcount;
 #ifdef HAVE_SCRIPT
   struct snoop_record {
     struct in6_addr client, prefix;
@@ -1275,7 +1278,7 @@ extern struct daemon {
   struct serverfd *sfds;
   struct irec *interfaces;
   struct listener *listeners;
-  struct server *srv_save; /* Used for resend on DoD */
+  void *srv_save;      /* Used for resend on DoD and tftp prefetch */
   size_t packet_len;       /*      "        "        */
   int    fd_save;          /*      "        "        */
   pid_t *tcp_pids;
@@ -1666,6 +1669,9 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
 		  time_t recvtime, struct in_addr leasequery_source);
 unsigned char *extended_hwaddr(int hwtype, int hwlen, unsigned char *hwaddr, 
 			       int clid_len, unsigned char *clid, int *len_out);
+void relay_upstream4(struct in_addr iface_addr, int iface_index,
+		     struct dhcp_packet *mess, size_t sz, int unicast);
+unsigned int relay_reply4(struct dhcp_packet *mess, size_t sz, char *arrival_interface);
 #endif
 
 /* dnsmasq.c */
@@ -1801,7 +1807,7 @@ void get_client_mac(struct in6_addr *client, int iface, unsigned char *mac,
   
 /* rfc3315.c */
 #ifdef HAVE_DHCP6
-unsigned short dhcp6_reply(struct dhcp_context *context, int interface, char *iface_name,  
+unsigned short dhcp6_reply(struct dhcp_context *context, int multicast_dest, int interface, char *iface_name,  
 			   struct in6_addr *fallback, struct in6_addr *ll_addr, struct in6_addr *ula_addr,
 			   size_t sz, struct in6_addr *client_addr, time_t now);
 int relay_upstream6(int iface_index, ssize_t sz, struct in6_addr *peer_address, 
@@ -1912,6 +1918,7 @@ unsigned char *find_pseudoheader(struct dns_header *header, size_t plen,
 size_t add_pseudoheader(struct dns_header *header, size_t plen, unsigned char *limit, 
 			int optno, unsigned char *opt, size_t optlen, int set_do, int replace);
 size_t add_do_bit(struct dns_header *header, size_t plen, unsigned char *limit);
+void edns0_needs_mac(union mysockaddr *addr, time_t now);
 size_t add_edns0_config(struct dns_header *header, size_t plen, unsigned char *limit, 
 			union mysockaddr *source, time_t now, int *cacheable);
 int check_source(struct dns_header *header, size_t plen, unsigned char *pseudoheader, union mysockaddr *peer);
