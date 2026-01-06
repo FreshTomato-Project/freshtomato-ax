@@ -654,7 +654,7 @@ function regen_captcha(){
 		<div class="prod_madelName"><#Web_Title2#></div>
 
 		<!-- Login field -->
-		<div id="login_filed">
+		<div id="login_field">
 			<div class="p1 title_gap"><#Sign_in_title#></div>
 
 			<div id="name_title_ie" style="display:none;margin:20px 0 -10px 78px;" class="p1 title_gap"><#Username#></div>
