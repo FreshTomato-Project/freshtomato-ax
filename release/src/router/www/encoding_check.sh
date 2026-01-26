@@ -1,6 +1,2 @@
 #!/bin/sh
-find -name "*.asp" | xargs enca -L none > en_result.txt
-find -name "*.htm" | xargs enca -L none >> en_result.txt
-find -name "*.js" | xargs enca -L none >> en_result.txt
-find -name "*.dict" | xargs enca -L none >> en_result.txt
-
+find . \( -name "*.asp" -o -name "*.htm" -o -name "*.js" -o -name "*.dict" \) -print0 | xargs -0 enca -L none > en_result.txt
