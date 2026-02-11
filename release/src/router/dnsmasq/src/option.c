@@ -23,6 +23,9 @@ static volatile int mem_recover = 0;
 static jmp_buf mem_jmp;
 static int one_file(char *file, int hard_opt);
 
+static void *opt_malloc_real(const char *func, unsigned int line, size_t size);
+#define opt_malloc(x) opt_malloc_real(__func__, __LINE__, (x))
+
 /* Solaris headers don't have facility names. */
 #ifdef HAVE_SOLARIS_NETWORK
 static const struct {
@@ -197,6 +200,7 @@ struct myoption {
 #define LOPT_DO_ENCODE     388
 #define LOPT_LEASEQUERY    389
 #define LOPT_SPLIT_RELAY   390
+#define LOPT_LOG_MALLOC    391
 
 #ifdef HAVE_GETOPT_LONG
 static const struct option opts[] =  
@@ -398,6 +402,7 @@ static const struct myoption opts[] =
     { "no-ident", 0, 0, LOPT_NO_IDENT },
     { "max-tcp-connections", 1, 0, LOPT_MAX_PROCS },
     { "leasequery", 2, 0, LOPT_LEASEQUERY },
+    { "log-malloc", 0, 0, LOPT_LOG_MALLOC },
     { NULL, 0, 0, 0 }
   };
 
@@ -606,6 +611,7 @@ static struct {
   { LOPT_NO_IDENT, OPT_NO_IDENT, NULL, gettext_noop("Do not add CHAOS TXT records."), NULL },
   { LOPT_CACHE_RR, ARG_DUP, "<RR-type>", gettext_noop("Cache this DNS resource record type."), NULL },
   { LOPT_MAX_PROCS, ARG_ONE, "<integer>", gettext_noop("Maximum number of concurrent tcp connections."), NULL },
+  { LOPT_LOG_MALLOC, OPT_LOG_MALLOC, NULL, gettext_noop("Log memory allocation for debugging."), NULL },
   { 0, 0, NULL, NULL, NULL }
 }; 
 
@@ -652,13 +658,13 @@ static void unhide_metas(char *cp)
       *cp = unhide_meta(*cp);
 }
 
-static void *opt_malloc(size_t size)
+static void *opt_malloc_real(const char *func, unsigned int line, size_t size)
 {
   void *ret;
 
   if (mem_recover)
     {
-      ret = whine_malloc(size);
+      ret = whine_malloc_real(func, line, size);
       if (!ret)
 	longjmp(mem_jmp, 1);
     }
@@ -3463,6 +3469,8 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 	    }
 	  else if (strcmp(arg, "auth") == 0)
 	    set_option_bool(OPT_AUTH_LOG);
+	  else if (strcmp(arg, "only_failed") == 0)
+	    set_option_bool(OPT_LOG_ONLY_FAILED);
 	}
       break;
 
@@ -5729,7 +5737,7 @@ struct hostsfile *expand_filelist(struct hostsfile *list)
   struct dirent **namelist;
 
   /* find largest used index */
-  for (i = SRC_AH, ah = list; ah; ah = ah->next)
+  for (last = NULL, i = SRC_AH, ah = list; ah; ah = ah->next)
     {
       last = ah;
       

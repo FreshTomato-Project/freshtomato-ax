@@ -341,26 +341,6 @@ void safe_pipe(int *fd, int read_noblock)
     die(_("cannot create pipe: %s"), NULL, EC_MISC);
 }
 
-void *whine_malloc(size_t size)
-{
-  void *ret = calloc(1, size);
-
-  if (!ret)
-    my_syslog(LOG_ERR, _("failed to allocate %d bytes"), (int) size);
-  
-  return ret;
-}
-
-void *whine_realloc(void *ptr, size_t size)
-{
-  void *ret = realloc(ptr, size);
-
-  if (!ret)
-    my_syslog(LOG_ERR, _("failed to reallocate %d bytes"), (int) size);
-
-  return ret;
-}
-
 int sockaddr_isequal(const union mysockaddr *s1, const union mysockaddr *s2)
 {
   if (s1->sa.sa_family == s2->sa.sa_family)
@@ -443,8 +423,8 @@ int hostname_issubdomain(char *a, char *b)
   for (ap = a; *ap; ap++); 
   for (bp = b; *bp; bp++);
 
-  /* a shorter than b or a empty. */
-  if ((bp - b) < (ap - a) || ap == a)
+  /* a shorter than b */
+  if ((ap - a) < (bp - b))
     return 0;
 
   do
@@ -459,12 +439,12 @@ int hostname_issubdomain(char *a, char *b)
 
        if (c1 != c2)
 	 return 0;
-    } while (ap != a);
+    } while (bp != b);
 
-  if (bp == b)
+  if (ap == a)
     return 2;
 
-  if (*(--bp) == '.')
+  if (*(--ap) == '.')
     return 1;
 
   return 0;
@@ -692,32 +672,6 @@ int memcmp_masked(unsigned char *a, unsigned char *b, int len, unsigned int mask
   return count;
 }
 
-/* _note_ may copy buffer */
-int expand_buf(struct iovec *iov, size_t size)
-{
-  void *new;
-
-  if (size <= (size_t)iov->iov_len)
-    return 1;
-
-  if (!(new = whine_malloc(size)))
-    {
-      errno = ENOMEM;
-      return 0;
-    }
-
-  if (iov->iov_base)
-    {
-      memcpy(new, iov->iov_base, iov->iov_len);
-      free(iov->iov_base);
-    }
-
-  iov->iov_base = new;
-  iov->iov_len = size;
-
-  return 1;
-}
-
 char *print_mac(char *buff, unsigned char *mac, int len)
 {
   char *p = buff;
@@ -777,41 +731,58 @@ int retry_send(ssize_t rc)
    "once" fails on EAGAIN, as this a timeout.
    This indicates a timeout of a TCP socket.
 */
-int read_write(int fd, unsigned char *packet, int size, int rw)
+int read_writev(int fd, struct iovec *iov, int iovcnt, int rw)
 {
-  ssize_t n, done;
-  
-  for (done = 0; done < size; done += n)
-    {
-      if (rw & 1)
-	n = read(fd, &packet[done], (size_t)(size - done));
-      else
-	n = write(fd, &packet[done], (size_t)(size - done));
-      
-      if (n == 0)
-	return 0;
+  int cur = 0;
+  ssize_t n, done = 0;
 
+  while (cur < iovcnt)
+    {
+      iov[cur].iov_len -= done;
+      iov[cur].iov_base =  ((char *)iov[cur].iov_base) + done;
+
+      if (rw & 1)
+	n = readv(fd, &iov[cur], iovcnt - cur);
+      else
+	n = writev(fd, &iov[cur], iovcnt - cur);
+
+      iov[cur].iov_len += done;
+      iov[cur].iov_base = ((char *)iov[cur].iov_base) - done;
+      
       if (n == -1)
 	{
-	  n = 0; /* don't mess with counter when we loop. */
-
 	  if (errno == EINTR || errno == ENOMEM || errno == ENOBUFS)
 	    continue;
-
-	  if (errno == EAGAIN || errno == EWOULDBLOCK)
-	    {
-	      /* "once" variant */
-	      if (rw & 2)
-		return 0;
-
-	      continue;
-	    }
+	  
+	  if (!(rw & 2) && (errno == EAGAIN || errno == EWOULDBLOCK))
+	    continue;
 
 	  return 0;
 	}
+      
+      if (n == 0 && (rw & 1))
+	return 0;
+      
+      done += n;
+      while (cur < iovcnt && (size_t)done >= iov[cur].iov_len)
+	done -= iov[cur++].iov_len;
     }
           
   return 1;
+}
+
+int read_write(int fd, unsigned char *packet, int size, int rw)
+{
+  struct iovec iov;
+
+  /* size == 0 is not an error, just a NOOP. */
+  if (size == 0)
+    return 1;
+  
+  iov.iov_len = (size_t)size;
+  iov.iov_base = packet;
+
+  return read_writev(fd, &iov, 1, rw);
 }
 
 /* close all fds except STDIN, STDOUT and STDERR, spare1, spare2 and spare3 */
@@ -949,3 +920,87 @@ int kernel_version(void)
   return version * 256 + (split ? atoi(split) : 0);
 }
 #endif
+
+#define hash_ptr(x) (((unsigned int)(((char *)(x)) - ((char *)NULL))) & 0xffffff)
+
+void *whine_malloc_real(const char *func, unsigned int line, size_t size)
+{
+  void *ret = calloc(1, size);
+  
+  if (!ret)
+    my_syslog(LOG_ERR, _("failed to allocate %d bytes"), (int) size);
+  else if (daemon->log_malloc)
+    my_syslog(LOG_INFO, _("malloc: %s:%u %zu bytes at %x"), func, line, size, hash_ptr(ret));
+
+  return ret;
+}
+
+void *whine_realloc_real(const char *wrapper, const char *func, unsigned int line, void *ptr, size_t size)
+{
+  unsigned int old = hash_ptr(ptr);
+  void *ret = realloc(ptr, size);
+  
+  if (!ret)
+    my_syslog(LOG_ERR, _("failed to reallocate %d bytes"), (int) size);
+  else if (daemon->log_malloc)
+    {
+      if (!wrapper)
+	wrapper = "realloc";
+      my_syslog(LOG_INFO, _("%s: %s:%u %zu bytes from %x to %x"), wrapper, func, line, size, old, hash_ptr(ret));
+    }
+  
+  return ret;
+}
+
+/* _note_ may copy buffer */
+int expand_buf_real(const char *func, unsigned int line, struct iovec *iov, size_t size)
+{
+  void *new;
+
+  if (size <= (size_t)iov->iov_len)
+    return 1;
+
+  if (!(new = whine_realloc_real("expand_buf", func, line, iov->iov_base, size)))
+    {
+      errno = ENOMEM;
+      return 0;
+    }
+
+  iov->iov_base = new;
+  iov->iov_len = size;
+
+  return 1;
+}
+
+int expand_workspace_real(const char *func, unsigned int line, unsigned char ***wkspc, int *szp, int new)
+{
+  unsigned char **p;
+  int old = *szp;
+
+  if (old >= new+1)
+    return 1;
+
+  new += 5;
+
+  if (!(p = whine_realloc_real("expand_workspace", func, line, *wkspc, new * sizeof(unsigned char *))))
+    return 0;
+
+  memset(p+old, 0, new-old);
+  
+  *wkspc = p;
+  *szp = new;
+
+  return 1;
+}
+
+#undef free
+void free_real(const char *func, unsigned int line, void *ptr)
+{
+  if (ptr)
+    {
+      if (daemon->log_malloc)
+	my_syslog(LOG_INFO, _("free: %s:%u block at %x"), func, line, hash_ptr(ptr));
+  
+      free(ptr);
+    }
+}

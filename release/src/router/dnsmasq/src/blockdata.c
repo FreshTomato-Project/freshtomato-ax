@@ -193,20 +193,22 @@ void *blockdata_retrieve(struct blockdata *block, size_t len, void *data)
 {
   size_t blen;
   struct  blockdata *b;
-  uint8_t *new, *d;
+  uint8_t *d;
   
-  static unsigned int buff_len = 0;
-  static unsigned char *buff = NULL;
-   
   if (!data)
     {
+      static unsigned int buff_len = 0;
+      static unsigned char *buff = NULL;
+      uint8_t *new;
+      
       if (len > buff_len)
 	{
-	  if (!(new = whine_malloc(len)))
+	  blen = len + 1024;
+	  if (!(new = whine_realloc(buff, blen)))
 	    return NULL;
-	  if (buff)
-	    free(buff);
+
 	  buff = new;
+	  buff_len = blen;
 	}
       data = buff;
     }
