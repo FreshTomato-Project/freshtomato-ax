@@ -954,6 +954,7 @@ static void dnssec_validate(struct frec *forward, struct dns_header *header,
 	  /* As soon as anything returns BOGUS, we stop and unwind, to do otherwise
 	     would invite infinite loops, since the answers to DNSKEY and DS queries
 	     will not be cached, so they'll be repeated. */
+	ds_retry:
 	  if (forward->flags & FREC_DNSKEY_QUERY)
 	    status = dnssec_validate_by_ds(now, header, plen, daemon->namebuff, daemon->keyname, forward->class, &orig->validate_counter);
 	  else if (forward->flags & FREC_DS_QUERY)
@@ -1083,6 +1084,18 @@ static void dnssec_validate(struct frec *forward, struct dns_header *header,
 				       STAT_ISEQUAL(status, STAT_NEED_KEY) ? "dnssec-query[DNSKEY]" : "dnssec-query[DS]", 0);
 		  return;
 		}
+
+	      /* If there's no server for the parent of a domain-specific server's domain,
+		 assume that said server's contents it legitimately unsigned, as if the parent
+		 contained a negative DS record. This is part of the same logic that's found
+		 in dnssec_validate_ds() when it gets a negative DS repsonse. */
+	      if (STAT_ISEQUAL(status, STAT_NEED_DS) && serverind == -1 && lookup_domain(daemon->keyname, F_DOMAINSRV, NULL, NULL) &&
+		  cache_neg_ds(daemon->keyname, F_FORWARD | F_DS | F_NEG | F_DNSSECOK, forward->class, now, DNSSEC_ASSUMED_DS_TTL) == STAT_OK)
+		{
+		  my_syslog(LOG_WARNING, _("no server for parent domain of %s, assuming unsigned domain"), daemon->keyname);
+		  blockdata_free(stash);
+		  goto ds_retry;
+		}
 	      
 	      /* error unwind */
 	      free_rfds(&rfds);
@@ -1192,10 +1205,10 @@ void reply_query(int fd, time_t now)
 	  server = daemon->serverarray[serv];
 	  if (server->sfd && server->sfd->fd == fd)
 	    break;
-
-	  if (serv == last)
-	    return;
 	}
+
+      if (serv == last)
+	return;
     }
   
   /* spoof check: answer must come from known server, also
@@ -2162,9 +2175,12 @@ static ssize_t tcp_talk(int first, int last, int start, struct dns_header *heade
 	     someone might be attempting to insert bogus values into the cache by 
 	     sending replies containing questions and bogus answers.
 	     Try another server, or give up */
-	  p = (unsigned char *)(((struct dns_header *)recvbuff->iov_base)+1);
-	  if (extract_name(((struct dns_header *)recvbuff->iov_base), rsize, &p, daemon->namebuff, EXTR_NAME_COMPARE, 4) != 1)
+	  struct dns_header *header = (struct dns_header *)recvbuff->iov_base;
+	  p = (unsigned char *)(header+1);
+	  if (rsize < (unsigned int)sizeof(struct dns_header) || !(header->hb3 & HB3_QR) || ntohs(header->qdcount) != 1 ||
+	      extract_name(header, rsize, &p, daemon->namebuff, EXTR_NAME_COMPARE, 4) != 1)
 	    continue;
+	  
 	  GETSHORT(rtype, p); 
 	  GETSHORT(rclass, p);
       
@@ -2442,25 +2458,34 @@ void tcp_request(int confd, time_t now, struct iovec *bigbuff,
 	    break;
 	  
 	  /* Now get the query into the normal UDP packet buffer.
-	     Ignore queries long than this. If we're answering locally,
+	     Ignore queries longer than this. If we're answering locally,
 	     copy the query into the output buffer, but for forwarding, tcp_talk()
-	     wants the query in a a different buffer from the reply.
-	     Note that we overwrote any saved UDP query - this onlt matters in debug mode. */
+	     wants the query in  different buffer from the reply.
+	     Note that we overwrote any saved UDP query - this only matters in debug mode. */
 	  daemon->srv_save = NULL;
 	  if (!read_write(confd, (unsigned char *)&tcp_len, sizeof(tcp_len), RW_READ) ||
 	      !(size = ntohs(tcp_len)) || size > (size_t)daemon->packet_buff_sz ||
 	      !read_write(confd, (unsigned char *)daemon->packet, size, RW_READ))
 	    break;
 	  
-	  if (size < (int)sizeof(struct dns_header))
+	  /* header == query */
+	  header = (struct dns_header *)daemon->packet;
+
+	  if (size < (int)sizeof(struct dns_header) || (header->hb3 & HB3_QR))
 	    continue;
 	  
 	  /* Make sure we have a buffer big enough for the largest answer. */
 	  expand_buf(bigbuff, 65536 + MAXDNAME + RRFIXEDSZ);
 	  out_header = bigbuff->iov_base;
 	  
-	  /* header == query */
-	  header = (struct dns_header *)daemon->packet;
+	  /* Add edns0 pheader to query */
+	  size = add_edns0_config(header, size, ((unsigned char *) header) + daemon->packet_buff_sz, &peer_addr, now, &cacheable);
+
+	  /* Clear buffer to avoid risk of information disclosure. */
+	  memset(bigbuff->iov_base, 0, bigbuff->iov_len);
+	  /* Copy query into output buffer for local answering */
+	  memcpy(out_header, header, size);	    
+	      
 	  query_count++;
 	  
 	  /* log_query gets called indirectly all over the place, so 
@@ -2493,13 +2518,6 @@ void tcp_request(int confd, time_t now, struct iovec *bigbuff,
 		    do_bit = 1; /* do bit */ 
 		}
 
-	      size = add_edns0_config(header, size, ((unsigned char *) header) + daemon->edns_pktsz, &peer_addr, now, &cacheable);
-
-	      /* Clear buffer to avoid risk of information disclosure. */
-	      memset(bigbuff->iov_base, 0, bigbuff->iov_len);
-	      /* Copy query into output buffer for local answering */
-	      memcpy(out_header, header, size);	    
-	      
 	      log_query_mysockaddr((auth_dns ? F_NOERR | F_AUTH : 0) | F_QUERY | F_FORWARD, daemon->namebuff,
 				   &peer_addr, NULL, qtype);
 	      
@@ -2552,7 +2570,7 @@ void tcp_request(int confd, time_t now, struct iovec *bigbuff,
 	      else if (!allowed)
 		{
 		  ede = EDE_BLOCKED;
-		  m = answer_disallowed(header, size, (u32)mark, daemon->namebuff);
+		  m = answer_disallowed(out_header, size, (u32)mark, daemon->namebuff);
 		}
 #endif
 #ifdef HAVE_AUTH
@@ -2568,7 +2586,7 @@ void tcp_request(int confd, time_t now, struct iovec *bigbuff,
       /* Do this by steam now we're not in the select() loop */
       check_log_writer(1); 
       
-      if (m == 0 && ede == EDE_UNSET)
+      if (!flags && m == 0 && ede == EDE_UNSET)
 	{
 	  struct server *master;
 	  int start;

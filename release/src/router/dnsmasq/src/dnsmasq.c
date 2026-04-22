@@ -199,7 +199,7 @@ int main (int argc, char **argv)
       /* Must have at least a root trust anchor, or the DNSSEC code
 	 can loop forever. */
       for (ds = daemon->ds; ds; ds = ds->next)
-	if (ds->name[0] == 0)
+	if (ds->name && ds->name[0] == 0)
 	  break;
 
       if (!ds)
@@ -436,14 +436,6 @@ int main (int argc, char **argv)
       for (i = 0; i < daemon->max_procs; i++)
 	daemon->tcp_pipes[i] = -1;
     }
-
-#ifdef HAVE_INOTIFY
-  if ((daemon->port != 0 && !option_bool(OPT_NO_RESOLV)) ||
-      daemon->dynamic_dirs)
-    inotify_dnsmasq_init();
-  else
-    daemon->inotifyfd = -1;
-#endif
 
   if (daemon->dump_file)
 #ifdef HAVE_DUMPFILE
@@ -864,6 +856,14 @@ int main (int argc, char **argv)
     }
 #endif
 
+#ifdef HAVE_INOTIFY
+  if ((daemon->port != 0 && !option_bool(OPT_NO_RESOLV)) ||
+      daemon->dynamic_dirs)
+    inotify_dnsmasq_init(err_pipe[1]);
+  else
+    daemon->inotifyfd = -1;
+#endif
+  
    /* Don't start logging malloc before logging is set up. */
   daemon->log_malloc = option_bool(OPT_LOG_MALLOC);
   
@@ -946,9 +946,27 @@ int main (int argc, char **argv)
 	my_syslog(LOG_INFO, _("DNSSEC signature timestamps not checked until system time valid"));
 
       for (ds = daemon->ds; ds; ds = ds->next)
-	my_syslog(LOG_INFO,
-		  ds->digestlen == 0 ? _("configured with negative trust anchor for %s") : _("configured with trust anchor for %s keytag %u"),
-		  ds->name[0] == 0 ? "<root>" : ds->name, ds->keytag);
+	{
+	  struct ds_config *ds1;
+	  
+	  for (ds1 = ds->next; ds1; ds1 = ds1->next)
+	    if (strcmp(ds->name, ds1->name) == 0 &&
+		ds->digestlen == ds1->digestlen &&
+		(ds->digestlen == 0 ||
+		 (ds->algo == ds1->algo &&
+		  ds->keytag == ds1->keytag &&
+		  ds->digest_type == ds1->digest_type &&
+		  memcmp(ds->digest, ds1->digest, ds->digestlen) == 0)))
+	      {
+		ds->name = NULL; /* Mark as duplicate */
+		break;
+	      }
+	  
+	  if (ds->name)
+	    my_syslog(LOG_INFO,
+		      ds->digestlen == 0 ? _("configured with negative trust anchor for %s") : _("configured with trust anchor for %s keytag %u"),
+		      ds->name[0] == 0 ? "<root>" : ds->name, ds->keytag);
+	}
     }
 #endif
 
@@ -1367,8 +1385,6 @@ static void sig_handler(int sig)
 		  read_write(daemon->pipe_to_parent, (unsigned char *)(&daemon->forward_to_tcp), sizeof(daemon->forward_to_tcp), RW_WRITE);
 		  read_write(daemon->pipe_to_parent, (unsigned char *)(&daemon->forward_to_tcp->uid), sizeof(daemon->forward_to_tcp->uid), RW_WRITE);
 
-		  my_syslog(LOG_INFO, _("TCP process for DNSSEC validation timed out"));
-
 		  _exit(0);
 		}
 	    }
@@ -1527,6 +1543,26 @@ static void fatal_event(struct event_desc *ev, char *msg)
       /* fall through */
     case EVENT_TIME_ERR:
       die(_("cannot create timestamp file %s: %s" ), msg, EC_BADCONF);
+
+      /* fall through */
+    case EVENT_LINK_ERR:
+      die(_("cannot access path %s: %s" ), msg, EC_MISC);
+
+       /* fall through */
+    case EVENT_INOTFY_ERR:
+      die(_("failed to create inotify: %s" ), NULL, EC_MISC);
+
+      /* fall through */
+    case EVENT_TMSL_ERR:
+      die(_("too many symlinks following %s"), msg, EC_MISC);
+
+      /* fall through */
+    case EVENT_RESOLV_ERR:
+      die(_("directory %s for resolv-file is missing, cannot poll"), msg, EC_MISC);
+
+      /* fall through */
+    case EVENT_IFILE_ERR:
+      die(_("failed to create inotify for %s: %s"), msg, EC_MISC);
     }
 }	
       

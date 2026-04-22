@@ -1083,6 +1083,9 @@ int cache_recv_insert(time_t now, int fd)
 	     !read_write(fd, (unsigned char *)&validatecount, sizeof(validatecount), RW_READ) ||
 	     !read_write(fd, (unsigned char *)&validatecountp, sizeof(validatecountp), RW_READ)))
 	  return 0;
+
+	if (op == PIPE_OP_KILLED)
+	  my_syslog(LOG_INFO, _("TCP process for DNSSEC validation timed out"));
 	
 	/* There's a tiny chance that the frec may have been freed 
 	   and reused before the TCP process returns. Detect that with
@@ -1600,7 +1603,7 @@ void cache_reload(void)
   
 #ifdef HAVE_DNSSEC
   for (ds = daemon->ds; ds; ds = ds->next)
-    if ((cache = get_config_crec()))
+    if (ds->name && (cache = get_config_crec()))
       {
 	
 	if (!(cache->addr.ds.keydata = blockdata_alloc(ds->digest, ds->digestlen)))

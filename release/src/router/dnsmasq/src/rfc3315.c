@@ -39,8 +39,8 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 static void log6_opts(int nest, unsigned int xid, void *start_opts, void *end_opts);
 static void log6_packet(struct state *state, char *type, struct in6_addr *addr, char *string);
 static void log6_quiet(struct state *state, char *type, struct in6_addr *addr, char *string);
-static void *opt6_find (uint8_t *opts, uint8_t *end, unsigned int search, unsigned int minsize);
-static void *opt6_next(uint8_t *opts, uint8_t *end);
+static void *opt6_find (uint8_t *opts, uint8_t *end, unsigned int search, int minsize);
+static void *opt6_first(uint8_t *opt, uint8_t *end);
 static unsigned int opt6_uint(unsigned char *opt, int offset, int size);
 static void get_context_tag(struct state *state, struct dhcp_context *context);
 static int check_ia(struct state *state, void *opt, void **endp, void **ia_option);
@@ -62,6 +62,7 @@ static void calculate_times(struct dhcp_context *context, unsigned int *min_time
 #define opt6_len(opt) ((int)(opt6_uint(opt, -2, 2)))
 #define opt6_type(opt) (opt6_uint(opt, -4, 2))
 #define opt6_ptr(opt, i) ((void *)&(((uint8_t *)(opt))[4+(i)]))
+#define opt6_next(opt, end) (opt6_first(opt6_ptr((opt), opt6_len((opt))), (end)))
 
 #define opt6_user_vendor_ptr(opt, i) ((void *)&(((uint8_t *)(opt))[2+(i)]))
 #define opt6_user_vendor_len(opt) ((int)(opt6_uint(opt, -4, 2)))
@@ -112,10 +113,17 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t 
 {
   uint8_t *end = inbuff + sz;
   uint8_t *opts = inbuff + 34;
-  int msg_type = *inbuff;
+  int msg_type;
   unsigned char *outmsgtypep;
   uint8_t *opt;
   struct dhcp_vendor *vendor;
+
+  /* must have at least msg_type+trans_id
+     which is               1   +   3      = 4 */
+  if (sz < 4)
+    return 0;
+
+  msg_type = *inbuff;
 
   /* if not an encapsulated relayed message, just do the stuff */
   if (msg_type != DHCP6RELAYFORW)
@@ -233,11 +241,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t 
       memcpy(&state->mac[0], opt6_ptr(opt, 2), state->mac_len);
     }
   
-  for (opt = opts; opt; opt = opt6_next(opt, end))
+  for (opt = opt6_first(opts, end); opt; opt = opt6_next(opt, end))
     {
-      if ((uint8_t *)opt6_ptr(opt, 0) + opt6_len(opt) > end)
-        return 0;
-     
       /* Don't copy MAC address into reply. */
       if (opt6_type(opt) != OPTION6_CLIENT_MAC)
 	{
@@ -290,7 +295,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
   state->hostname = NULL;
   state->client_hostname = NULL;
   state->fqdn_flags = 0x01; /* default to send if we receive no FQDN option */
-
+  
   /* set tag with name == interface */
   iface_id.net = state->iface_name;
   iface_id.next = state->tags;
@@ -387,13 +392,26 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 	      if (opt6_len(opt) < 4)
 		continue;
 	      
-	      if (vendor->enterprise != opt6_uint(opt, 0, 4))
+	      if (vendor->enterprise != 0 && vendor->enterprise != opt6_uint(opt, 0, 4))
 		continue;
-	    
+
+	      /* matching enterprise, no string match. */
+	      if (vendor->enterprise != 0 && vendor->len == 0)
+		{
+		  vendor->netid.next = state->tags;
+		  state->tags = &vendor->netid;
+		  break;
+		}
+	      
 	      offset = 4;
+
+	      /* If we're going to search the strings below, there must be at least one empty string to search
+		 I think a vendor_class option with just the enterprise number is valid. */
+	      if (opt6_len(opt) < 6)
+		continue;
 	    }
- 
-	  /* Note that format if user/vendor classes is different to DHCP options - no option types. */
+
+       	  /* Note that format if user/vendor classes is different to DHCP options - no option types. */
 	  for (enc_opt = opt6_ptr(opt, offset); enc_opt; enc_opt = opt6_user_vendor_next(enc_opt, enc_end))
 	    for (i = 0; i <= (opt6_user_vendor_len(enc_opt) - vendor->len); i++)
 	      if (memcmp(vendor->data, opt6_user_vendor_ptr(enc_opt, i), vendor->len) == 0)
@@ -657,7 +675,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 	for (c = state->context; c; c = c->current)
 	  c->flags &= ~CONTEXT_CONF_USED;
 
-	for (opt = state->packet_options; opt; opt = opt6_next(opt, state->end))
+	for (opt = opt6_first(state->packet_options, state->end); opt; opt = opt6_next(opt, state->end))
 	  {   
 	    void *ia_option, *ia_end;
 	    unsigned int min_time = 0xffffffff;
@@ -821,7 +839,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 	if (ignore)
 	  return 0;
 	
-	for (opt = state->packet_options; opt; opt = opt6_next(opt, state->end))
+	for (opt = opt6_first(state->packet_options, state->end); opt; opt = opt6_next(opt, state->end))
 	  {   
 	    void *ia_option, *ia_end;
 	    unsigned int min_time = 0xffffffff;
@@ -932,7 +950,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 	
 	log6_quiet(state, msg_type == DHCP6RENEW ? "DHCPRENEW" : "DHCPREBIND", NULL, NULL);
 
-	for (opt = state->packet_options; opt; opt = opt6_next(opt, state->end))
+	for (opt = opt6_first(state->packet_options, state->end); opt; opt = opt6_next(opt, state->end))
 	  {
 	    void *ia_option, *ia_end;
 	    unsigned int min_time = 0xffffffff;
@@ -1067,7 +1085,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 	
 	log6_quiet(state, "DHCPCONFIRM", NULL, NULL);
 	
-	for (opt = state->packet_options; opt; opt = opt6_next(opt, state->end))
+	for (opt = opt6_first(state->packet_options, state->end); opt; opt = opt6_next(opt, state->end))
 	  {
 	    void *ia_option, *ia_end;
 	    
@@ -1143,7 +1161,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 
 	log6_quiet(state, "DHCPRELEASE", NULL, NULL);
 
-	for (opt = state->packet_options; opt; opt = opt6_next(opt, state->end))
+	for (opt = opt6_first(state->packet_options, state->end); opt; opt = opt6_next(opt, state->end))
 	  {
 	    void *ia_option, *ia_end;
 	    int made_ia = 0;
@@ -1208,7 +1226,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
 	
 	log6_quiet(state, "DHCPDECLINE", NULL, NULL);
 
-	for (opt = state->packet_options; opt; opt = opt6_next(opt, state->end))
+	for (opt = opt6_first(state->packet_options, state->end); opt; opt = opt6_next(opt, state->end))
 	  {
 	    void *ia_option, *ia_end;
 	    int made_ia = 0;
@@ -1580,10 +1598,7 @@ static int check_ia(struct state *state, void *opt, void **endp, void **ia_optio
 {
   *ia_option = NULL;
 
-  /* must be a minimal option to check without stepping outside received packet. */
-  if (opt6_ptr(opt, 4) > state->end)
-    return 0;
-  
+  /* callee ensures packet is long enough for opt6_len(opt) to be valid and believe-able. */
   state->ia_type = opt6_type(opt);
   
   if (state->ia_type != OPTION6_IA_NA && state->ia_type != OPTION6_IA_TA)
@@ -1595,10 +1610,7 @@ static int check_ia(struct state *state, void *opt, void **endp, void **ia_optio
   if (state->ia_type == OPTION6_IA_TA && opt6_len(opt) < 4)
     return 0;
   
-  /* Check we don't overflow the received packet. */
-  if ((*endp = opt6_ptr(opt, opt6_len(opt))) > state->end)
-    return 0;
-  
+  *endp = opt6_ptr(opt, opt6_len(opt));
   state->iaid = opt6_uint(opt, 0, 4);
   *ia_option = opt6_find(opt6_ptr(opt, state->ia_type == OPTION6_IA_NA ? 12 : 4), *endp, OPTION6_IAADDR, 24);
 
@@ -1913,10 +1925,10 @@ static void update_leases(struct state *state, struct dhcp_context *context, str
 	      lease_add_extradata(lease, (unsigned char *)daemon->dhcp_buff2, strlen(daemon->dhcp_buff2), 0);
 	      
 	      if (opt6_len(opt) >= 6) 
-		for (enc_opt = opt6_ptr(opt, 4); enc_opt; enc_opt = opt6_next(enc_opt, enc_end))
+		for (enc_opt = opt6_ptr(opt, 4); enc_opt; enc_opt = opt6_user_vendor_next(enc_opt, enc_end))
 		  {
 		    lease->vendorclass_count++;
-		    lease_add_extradata(lease, opt6_ptr(enc_opt, 0), opt6_len(enc_opt), 0);
+		    lease_add_extradata(lease, opt6_user_vendor_ptr(enc_opt, 0), opt6_user_vendor_len(enc_opt), 0);
 		  }
 	    }
 	  
@@ -1973,8 +1985,8 @@ static void update_leases(struct state *state, struct dhcp_context *context, str
 	  if ((opt = opt6_find(state->packet_options, state->end, OPTION6_USER_CLASS, 2)))
 	    {
 	      void *enc_opt, *enc_end = opt6_ptr(opt, opt6_len(opt));
-	      for (enc_opt = opt6_ptr(opt, 0); enc_opt; enc_opt = opt6_next(enc_opt, enc_end))
-		lease_add_extradata(lease, opt6_ptr(enc_opt, 0), opt6_len(enc_opt), 0);
+	      for (enc_opt = opt6_ptr(opt, 0); enc_opt; enc_opt = opt6_user_vendor_next(enc_opt, enc_end))
+		lease_add_extradata(lease, opt6_user_vendor_ptr(enc_opt, 0), opt6_user_vendor_len(enc_opt), 0);
 	    }
 	}
 #endif	
@@ -1989,10 +2001,10 @@ static void log6_opts(int nest, unsigned int xid, void *start_opts, void *end_op
   void *opt;
   char *desc = nest ? "nest" : "sent";
   
-  if (!option_bool(OPT_LOG_OPTS) || start_opts == end_opts)
+  if (!option_bool(OPT_LOG_OPTS))
     return;
   
-  for (opt = start_opts; opt; opt = opt6_next(opt, end_opts))
+  for (opt = opt6_first(start_opts, end_opts); opt; opt = opt6_next(opt, end_opts))
     {
       int type = opt6_type(opt);
       void *ia_options = NULL;
@@ -2025,9 +2037,15 @@ static void log6_opts(int nest, unsigned int xid, void *start_opts, void *end_op
 	}
       else if (type == OPTION6_STATUS_CODE)
 	{
-	  int len = sprintf(daemon->namebuff, "%u ", opt6_uint(opt, 0, 2));
-	  memcpy(daemon->namebuff + len, opt6_ptr(opt, 2), opt6_len(opt)-2);
-	  daemon->namebuff[len + opt6_len(opt) - 2] = 0;
+	  if (opt6_len(opt) >= 2)
+	    {
+	      int slen = opt6_len(opt) - 2;
+	      int len = sprintf(daemon->namebuff, "%u ", opt6_uint(opt, 0, 2));
+	      if (slen > (MAXDNAME * 2) - len - 1)
+		slen = (MAXDNAME * 2) - len - 1;
+	      memcpy(daemon->namebuff + len, opt6_ptr(opt, 2), slen);
+	      daemon->namebuff[len + slen] = 0;
+	    }
 	  optname = "status";
 	}
       else
@@ -2086,49 +2104,31 @@ static void log6_packet(struct state *state, char *type, struct in6_addr *addr, 
 	      string ? string : "");
 }
 
-static void *opt6_find (uint8_t *opts, uint8_t *end, unsigned int search, unsigned int minsize)
+static void *opt6_find(uint8_t *opts, uint8_t *end, unsigned int search, int minsize)
 {
-  u16 opt, opt_len;
-  void *start;
-  
-  if (!opts)
-    return NULL;
-    
-  while (1)
-    {
-      if (end - opts < 4) 
-	return NULL;
-      
-      start = opts;
-      GETSHORT(opt, opts);
-      GETSHORT(opt_len, opts);
-      
-      if (opt_len > (end - opts))
-	return NULL;
-      
-      if (opt == search && (opt_len >= minsize))
-	return start;
-      
-      opts += opt_len;
-    }
+  for (opts = opt6_first(opts, end); opts; opts = opt6_next(opts, end))
+    if (opt6_type(opts) == search && opt6_len(opts) >= minsize)
+      return opts;
+
+  return NULL;
 }
 
-static void *opt6_next(uint8_t *opts, uint8_t *end)
+static void *opt6_first(uint8_t *opt, uint8_t *end)
 {
-  u16 opt_len;
-  
-  if (end - opts < 4) 
+  if (!opt)
     return NULL;
-  
-  opts += 2;
-  GETSHORT(opt_len, opts);
-  
-  if (opt_len >= (end - opts))
-    return NULL;
-  
-  return opts + opt_len;
-}
 
+  /* make sure we have option number and length. */
+  if ((uint8_t *)opt6_ptr(opt, 0) > end)
+    return NULL;
+
+  /* make sure we have bytes promised by length. */
+  if ((uint8_t *)opt6_ptr(opt, opt6_len(opt)) > end)
+    return NULL;
+
+  return opt;
+}
+  
 static unsigned int opt6_uint(unsigned char *opt, int offset, int size)
 {
   /* this worries about unaligned data and byte order */

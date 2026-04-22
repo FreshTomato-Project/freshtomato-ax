@@ -23,7 +23,7 @@
     has no library dependencies other than libc */
 --- dnsmasq/src/dnsmasq.c
 +++ dnsmasq/src/dnsmasq.c
-@@ -971,14 +971,14 @@ int main (int argc, char **argv)
+@@ -989,14 +989,14 @@ int main (int argc, char **argv)
    if (!option_bool(OPT_NOWILD)) 
      for (if_tmp = daemon->if_names; if_tmp; if_tmp = if_tmp->next)
        if (if_tmp->name && !(if_tmp->flags & INAME_USED))
@@ -40,7 +40,7 @@
  	{
  #ifdef HAVE_DBUS
  	  if (option_bool(OPT_DBUS))
-@@ -1658,6 +1658,10 @@ static void async_event(int pipe, time_t now)
+@@ -1694,6 +1694,10 @@ static void async_event(int pipe, time_t now)
  	   we leave them logging to the old file. */
  	if (daemon->log_file != NULL)
  	  log_reopen(daemon->log_file);
@@ -51,7 +51,7 @@
  	break;
  
        case EVENT_NEWADDR:
-@@ -1702,6 +1706,10 @@ static void async_event(int pipe, time_t now)
+@@ -1738,6 +1742,10 @@ static void async_event(int pipe, time_t now)
  	  }
  #endif
  	
@@ -76,7 +76,7 @@
  #include <sys/wait.h>
  #include <sys/time.h>
  #include <sys/un.h>
-@@ -1492,6 +1496,7 @@ u32 rand32(void);
+@@ -1499,6 +1503,7 @@ u32 rand32(void);
  u64 rand64(void);
  int rr_on_list(struct rrlist *list, unsigned short rr);
  int legal_hostname(char *name);
@@ -84,7 +84,7 @@
  char *canonicalise(char *in, int *nomem);
  unsigned char *do_rfc1035_name(unsigned char *p, char *sval, char *limit);
  void *safe_malloc(size_t size);
-@@ -1633,6 +1638,9 @@ char *host_from_dns(struct in_addr addr);
+@@ -1642,6 +1647,9 @@ char *host_from_dns(struct in_addr addr);
  
  /* lease.c */
  #ifdef HAVE_DHCP
@@ -94,7 +94,7 @@
  void lease_update_file(time_t now);
  void lease_update_dns(int force);
  void lease_init(time_t now);
-@@ -1662,6 +1670,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
+@@ -1671,6 +1679,7 @@ void lease_set_expires(struct dhcp_lease *lease, unsigned int len, time_t now);
  void lease_set_vendorclass(struct dhcp_lease *lease, unsigned char *new, int len);
  struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int hw_type,  
  					unsigned char *clid, int clid_len);
@@ -117,7 +117,7 @@
      }
 --- dnsmasq/src/lease.c
 +++ dnsmasq/src/lease.c
-@@ -141,12 +141,14 @@ static int read_leases(time_t now, FILE *leasestream)
+@@ -149,12 +149,14 @@ static int read_leases(time_t now, FILE *leasestream)
  
  	ei = atol(daemon->dhcp_buff3);
  
@@ -133,7 +133,7 @@
  #else
  	/* strictly time_t is opaque, but this hack should work on all sane systems,
  	   even when sizeof(time_t) == 8 */
-@@ -275,6 +277,22 @@ static void ourprintf(int *errp, char *format, ...)
+@@ -283,6 +285,22 @@ static void ourprintf(int *errp, char *format, ...)
    va_end(ap);
  }
  
@@ -156,7 +156,7 @@
  void lease_update_file(time_t now)
  {
    struct dhcp_lease *lease;
-@@ -298,7 +316,15 @@ void lease_update_file(time_t now)
+@@ -306,7 +324,15 @@ void lease_update_file(time_t now)
  	    continue;
  #endif
  
@@ -172,7 +172,7 @@
  	  ourprintf(&err, "%u ", lease->length);
  #else
  	  ourprintf(&err, "%lu ", (unsigned long)lease->expires);
-@@ -342,7 +368,15 @@ void lease_update_file(time_t now)
+@@ -350,7 +376,15 @@ void lease_update_file(time_t now)
  	      if (!(lease->flags & (LEASE_TA | LEASE_NA)))
  		continue;
  
@@ -188,7 +188,7 @@
  	      ourprintf(&err, "%u ", lease->length);
  #else
  	      ourprintf(&err, "%lu ", (unsigned long)lease->expires);
-@@ -674,6 +708,26 @@ struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int h
+@@ -682,6 +716,26 @@ struct dhcp_lease *lease_find_by_client(unsigned char *hwaddr, int hw_len, int h
    return NULL;
  }
  
@@ -215,7 +215,7 @@
  struct dhcp_lease *lease_find_by_addr(struct in_addr addr)
  {
    struct dhcp_lease *lease;
-@@ -1057,7 +1111,7 @@ void lease_set_hostname(struct dhcp_lease *lease, const char *name, int auth, ch
+@@ -1065,7 +1119,7 @@ void lease_set_hostname(struct dhcp_lease *lease, const char *name, int auth, ch
    char *new_name = NULL, *new_fqdn = NULL;
  
    if (config_domain && (!domain || !hostname_isequal(domain, config_domain)))
@@ -276,7 +276,7 @@
  
 --- dnsmasq/src/rfc3315.c
 +++ dnsmasq/src/rfc3315.c
-@@ -172,7 +172,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
+@@ -180,7 +180,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
  	  if (!state->context)
  	    {
  	      inet_ntop(AF_INET6, state->link_address, daemon->addrbuff, ADDRSTRLEN); 
@@ -286,7 +286,7 @@
  			_("no address range available for DHCPv6 request from relay at %s"),
  			daemon->addrbuff);
  	      return 0;
-@@ -181,7 +182,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
+@@ -189,7 +190,8 @@ static int dhcp6_maybe_relay(struct state *state, unsigned char *inbuff, size_t
  	  
        if (!state->context)
  	{
@@ -296,7 +296,7 @@
  		    _("no address range available for DHCPv6 request via %s"), state->iface_name);
  	  return 0;
  	}
-@@ -500,7 +502,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
+@@ -518,7 +520,7 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
  	     pq--;
  	   *pq = 0;
  	   
@@ -305,7 +305,7 @@
  	     {
  	       struct dhcp_match_name *m;
  	       size_t nl = strlen(daemon->dhcp_buff);
-@@ -1127,7 +1129,8 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
+@@ -1145,7 +1147,8 @@ static int dhcp6_no_relay(struct state *state, int msg_type, unsigned char *inbu
  	else
  	  state->send_domain = get_domain6(NULL);
  
@@ -317,7 +317,7 @@
  	outmsgtype = DHCP6REPLY;
 --- dnsmasq/src/util.c
 +++ dnsmasq/src/util.c
-@@ -205,13 +205,15 @@ static int check_name(char *in)
+@@ -203,13 +203,15 @@ static int check_name(char *in)
     so check for legal char a-z A-Z 0-9 - _ 
     Note that this may receive a FQDN, so only check the first label 
     for the tighter criteria. */
@@ -336,7 +336,7 @@
  
    for (first = 1; (c = *name); name++, first = 0)
      /* check for legal char a-z A-Z 0-9 - _ . */
-@@ -223,14 +225,49 @@ int legal_hostname(char *name)
+@@ -221,14 +223,49 @@ int legal_hostname(char *name)
  
        if (!first && (c == '-' || c == '_'))
  	continue;
